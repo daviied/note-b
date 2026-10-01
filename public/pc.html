@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InkVault</title>
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/styles/pc.css">
+</head>
+<body class="empty">
+<div id="app">
+  <aside id="sidebar">
+    <div class="side-head">
+      <span class="brand">InkVault</span>
+      <span class="grow"></span>
+      <button class="icon" id="btn-new" title="New note (Alt+N)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></button>
+      <button class="icon" id="btn-folder" title="New folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/></svg></button>
+    </div>
+    <div class="search-wrap"><input id="search" type="search" placeholder="Search notes (Ctrl+Shift+F)" autocomplete="off"></div>
+    <div id="tree"></div>
+    <div id="results"></div>
+    <div class="side-foot">
+      <button class="icon" id="btn-switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></button>
+      <button class="icon" id="btn-theme" title="Toggle light/dark"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <button class="icon" id="btn-sidebar" title="Toggle sidebar"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <span id="crumb"></span>
+      <span class="grow"></span>
+      <button class="pill accent" id="btn-done-drawing" hidden title="Release the tablet (Esc)">Done drawing</button>
+      <button class="pill" id="btn-draw" title="Insert drawing field (Ctrl+Alt+D)"><svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L16.5 4.1a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z"/></svg>Insert drawing</button>
+      <button class="icon" id="btn-mode" title="Reading view (Ctrl+E)"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </header>
+    <div id="scroller">
+      <div id="page">
+        <input id="title" spellcheck="false" autocomplete="off" aria-label="Note title">
+        <div id="editor"></div>
+        <article id="reading"></article>
+      </div>
+      <div id="empty">
+        <p>No note open.</p>
+        <button class="pill accent" id="empty-new">Create a note</button>
+        <p class="muted">Ctrl+O to switch notes · Ctrl+Alt+D to insert a drawing</p>
+      </div>
+    </div>
+    <footer id="status">
+      <button id="tablet-chip" class="off" title="Connect a tablet"><i></i><span>…</span></button>
+      <span class="grow"></span>
+      <span id="counts"></span>
+      <span id="save-state"></span>
+    </footer>
+  </main>
+</div>
+
+<div id="ctx" hidden></div>
+
+<div class="modal" id="switcher" hidden>
+  <div class="dialog switcher"><input placeholder="Find or create a note…" spellcheck="false"><div class="list"></div></div>
+</div>
+
+<div class="modal" id="connect" hidden>
+  <div class="dialog connect">
+    <h2>Connect your tablet</h2>
+    <p>On the tablet, open this address in Chrome (Android) or Safari (iPad), on the same Wi-Fi:</p>
+    <div class="urls"></div>
+    <p class="docker" hidden>Use <code>http://&lt;your PC's LAN IP&gt;:4777/tablet</code> (find the IP with <code>ipconfig</code>). To get a QR code here, set <code>PUBLIC_URL</code> in <code>docker-compose.yml</code>, or open this page via the LAN IP instead of localhost.</p>
+    <p class="muted">To install it: Android Chrome → menu → <b>Add to Home screen</b>. iPad Safari → Share → <b>Add to Home Screen</b>.</p>
+    <button class="pill close">Close</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script type="module" src="/build/pc.js"></script>
+</body>
+</html>

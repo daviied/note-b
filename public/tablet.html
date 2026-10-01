@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>InkVault Tablet</title>
+<meta name="theme-color" content="#0e0e11">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="InkVault">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles/tablet.css">
+</head>
+<body>
+<div id="idle">
+  <div class="status"><span class="dot"></span><span class="txt-on">Connected · waiting for PC</span><span class="txt-off">Connecting…</span></div>
+  <button id="install" hidden>Install app</button>
+</div>
+
+<div id="board" hidden>
+  <header id="toolbar">
+    <button id="done" class="text">Done</button>
+    <span id="title"></span>
+    <span class="sep"></span>
+    <div class="group tools">
+      <button data-tool="pen" aria-label="Pen" title="Pen"><svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L16.5 4.1a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z"/><path d="M14.5 6l3.5 3.5"/></svg></button>
+      <button data-tool="pencil" aria-label="Pencil" title="Pencil (tilt to shade)"><svg viewBox="0 0 24 24"><path d="M4 20l1.5-5L15 5.5l3.5 3.5L9 18.5z"/><path d="M5.5 15l3.5 3.5"/><path d="M13 7.5l3.5 3.5"/></svg></button>
+      <button data-tool="highlighter" aria-label="Highlighter" title="Highlighter"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l2-2"/><path d="M9 15l7.5-9.5a2 2 0 0 1 3 2.6L12 18z"/><path d="M4 22h16" class="hl"/></svg></button>
+      <button data-tool="eraser" aria-label="Eraser" title="Eraser"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M5.6 15.4l8.5-8.5a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L11 20H8.4l-2.8-2.8a1.3 1.3 0 0 1 0-1.8z"/><path d="M10 11l5 5"/></svg></button>
+    </div>
+    <span class="sep"></span>
+    <div class="group" id="colors"></div>
+    <div class="group" id="sizes"></div>
+    <span class="grow"></span>
+    <div class="group">
+      <button id="undo" aria-label="Undo" title="Undo (two-finger tap)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+      <button id="redo" aria-label="Redo" title="Redo (three-finger tap)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+      <button id="more" aria-label="More" title="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
+    </div>
+  </header>
+  <div id="menu" hidden>
+    <label class="row"><input type="checkbox" id="opt-scribble"> Scribble to erase</label>
+    <label class="row"><input type="checkbox" id="opt-precise"> Precise eraser (cuts strokes)</label>
+    <hr>
+    <button class="row" id="act-extend">Add space below</button>
+    <button class="row" id="act-fit">Fit to width</button>
+    <button class="row" id="act-fullscreen">Toggle fullscreen</button>
+    <hr>
+    <button class="row danger" id="act-clear">Clear drawing</button>
+    <p class="hint">Fingers never draw, so rest your palm anywhere. Two fingers pan &amp; zoom. Two-finger tap: undo · three-finger tap: redo. Pen eraser end or side button erases.</p>
+  </div>
+  <div id="stage"><canvas id="base"></canvas><canvas id="live"></canvas></div>
+  <div id="toast"></div>
+</div>
+<script type="module" src="/build/tablet.js"></script>
+</body>
+</html>

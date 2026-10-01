@@ -1,24 +1,27 @@
-# InkVault for CasaOS (or any Docker host).
+# note-b for CasaOS (or any Docker host).
 # CasaOS: App Store → "+" (top right) → Install a customized app → Import → paste this file.
-name: inkvault
+name: note-b
 
 services:
-  inkvault:
+  note-b:
     image: ghcr.io/daviied/note-b:latest
-    container_name: inkvault
+    container_name: note-b
     restart: unless-stopped
     ports:
       - target: 4777
         published: "4777"
         protocol: tcp
+      # https: smooth pen input + installable tablet app (set up once via /install on the tablet)
+      - target: 4778
+        published: "4778"
+        protocol: tcp
     volumes:
       # Your notes (Markdown) and drawings (SVG). Back this folder up.
       - type: bind
-        source: /DATA/AppData/inkvault/vault
+        source: /DATA/AppData/note-b/vault
         target: /vault
     environment:
       # Optional. The address the tablet should use, e.g. http://192.168.1.20:4777
-      # Not needed if you open the PC page via the server's IP (the QR code uses that address).
       PUBLIC_URL: ""
     x-casaos:
       envs:
@@ -29,6 +32,9 @@ services:
         - container: "4777"
           description:
             en_us: Web UI (PC at /pc, tablet at /tablet)
+        - container: "4778"
+          description:
+            en_us: Secure web UI for the tablet app (see /install)
       volumes:
         - container: /vault
           description:
@@ -38,16 +44,16 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  main: inkvault
+  main: note-b
   author: daviied
   developer: daviied
   category: Productivity
   title:
-    en_us: InkVault
+    en_us: note-b
   tagline:
     en_us: Type notes on the PC, draw on the tablet
   description:
-    en_us: Obsidian-style Markdown notes. Drawing fields you add on the PC open automatically on your tablet, with pen pressure, tilt, palm rejection and scribble-to-erase.
+    en_us: Markdown notes with drawing fields you draw on your tablet, with pen pressure, tilt, palm rejection and scribble-to-erase.
   icon: https://raw.githubusercontent.com/daviied/note-b/main/docs/icon.png
   port_map: "4777"
   index: /pc

@@ -1,6 +1,6 @@
 // Tablet client: shows nothing until the PC opens a drawing field, then
 // becomes a pen-only canvas. Fingers never draw (palm rejection); two fingers
-// pan/zoom, two-finger tap undoes, three-finger tap redoes.
+// pan/zoom.
 import { connect } from '../common/socket.js';
 import {
   PAGE_WIDTH, drawPage, drawStroke, applyChange, inverseOf, finishPoints,
@@ -14,6 +14,7 @@ const PALETTES = {
 };
 const SIZES = { pen: [1.6, 3, 5.5], pencil: [2, 4, 8], highlighter: [14, 24, 38], eraser: [12, 28, 60] };
 const PEN_GRACE_MS = 600; // ignore touches this long after the pen was last seen
+const PRESSURE_EASE = 0.35; // 1 = raw pen pressure, lower = steadier line width
 
 // ---------------------------------------------------------------------------
 // Settings (per device)
@@ -26,6 +27,7 @@ const settings = Object.assign({
   highlighter: { color: PALETTES.highlighter[0], size: 1 },
   eraser: { size: 1, mode: 'stroke' },
   scribble: true,
+  autoFullscreen: true,
 }, load());
 function load() {
   try { return JSON.parse(localStorage.getItem('inkvault.tablet') || '{}'); } catch { return {}; }
@@ -45,7 +47,8 @@ const stage = $('#stage');
 const baseCv = $('#base');
 const liveCv = $('#live');
 const baseCtx = baseCv.getContext('2d');
-const liveCtx = liveCv.getContext('2d');
+// desynchronized = low-latency canvas (draws without waiting for the page compositor) where supported
+const liveCtx = liveCv.getContext('2d', { desynchronized: true }) || liveCv.getContext('2d');
 const toast = $('#toast');
 
 let current = null; // { id, note, drawing, undo: [], redo: [] }
@@ -167,7 +170,10 @@ function renderLive() {
       dirty.live = true;
     }
   }
-  if (input && input.kind === 'draw') drawStroke(ctx, input.stroke, { cache: false });
+  if (input && input.kind === 'draw') {
+    const s = input.predicted?.length ? { ...input.stroke, pts: input.stroke.pts.concat(input.predicted) } : input.stroke;
+    drawStroke(ctx, s, { cache: false });
+  }
   const cursor = input && input.kind === 'erase' ? input.last : hover;
   if (cursor) {
     const erasing = (input && input.kind === 'erase') || hover?.eraser;
@@ -307,6 +313,8 @@ function onPenMove(e) {
     }
     return;
   }
+  // Coalesced events carry every pen sample since the last frame (full pen rate);
+  // browsers only expose them on https, otherwise we get ~60 samples a second.
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of events.length ? events : [e]) {
     const p = pagePoint(ev);
@@ -314,11 +322,22 @@ function onPenMove(e) {
     else {
       const pts = input.stroke.pts;
       const q = pts[pts.length - 1];
+      // pen pressure is noisy; ease it so the line edge doesn't wobble
+      p[2] = q[2] + (p[2] - q[2]) * PRESSURE_EASE;
       if (Math.hypot(p[0] - q[0], p[1] - q[1]) * view.scale >= 0.75) pts.push(p);
       else q[2] = Math.max(q[2], p[2]);
     }
   }
-  if (input.kind === 'draw') sendLive();
+  if (input.kind === 'draw') {
+    // Where the pen is about to be: drawn ahead of time to hide latency, never saved.
+    const predicted = e.getPredictedEvents ? e.getPredictedEvents() : [];
+    input.predicted = predicted.slice(0, 3).map(ev => {
+      const p = pagePoint(ev);
+      p[2] = input.stroke.pts[input.stroke.pts.length - 1][2];
+      return p;
+    });
+    sendLive();
+  }
   dirty.live = true;
 }
 
@@ -391,22 +410,17 @@ function finishErase(st) {
 }
 
 // ---------------------------------------------------------------------------
-// Touch: never draws. Two fingers pan/zoom; quick two/three-finger taps undo/redo.
-// Single touches (palms) are ignored entirely.
+// Touch: never draws. Two fingers pan/zoom; single touches (palms) are ignored entirely.
 // ---------------------------------------------------------------------------
 
 const touches = new Map();
 let gesture = null;
-let tap = null;
 
 const penNearby = () => !!input || performance.now() - lastPenSeen < PEN_GRACE_MS;
 
 function onTouchDown(e) {
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, big: (e.width || 0) > 45 });
-  if (penNearby()) { tap = null; return; }
-  if (!tap || performance.now() - tap.start > 250) tap = { start: performance.now(), max: 0, moved: false, palm: false };
-  tap.max = Math.max(tap.max, touches.size);
-  if (touches.get(e.pointerId).big) tap.palm = true;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (penNearby()) return;
   if (touches.size === 2) startGesture();
   else if (touches.size > 2) endGesture();
 }
@@ -416,7 +430,6 @@ function onTouchMove(e) {
   if (!t) return;
   t.x = e.clientX;
   t.y = e.clientY;
-  if (Math.hypot(t.x - t.sx, t.y - t.sy) > 12 && tap) tap.moved = true;
   if (penNearby()) { endGesture(); return; }
   if (gesture && touches.size === 2) updateGesture();
 }
@@ -424,14 +437,6 @@ function onTouchMove(e) {
 function onTouchUp(e) {
   touches.delete(e.pointerId);
   if (touches.size < 2) endGesture();
-  if (touches.size === 0 && tap) {
-    const t = tap;
-    tap = null;
-    if (!t.moved && !t.palm && !penNearby() && performance.now() - t.start < 300) {
-      if (t.max === 2) { undo(); showToast('Undo'); }
-      else if (t.max === 3) { redo(); showToast('Redo'); }
-    }
-  }
 }
 
 function twoTouches() {
@@ -624,6 +629,28 @@ idle.addEventListener('click', e => {
   idle._t = setTimeout(() => idle.classList.remove('reveal'), 4000);
 });
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// Fullscreen without installing: browsers only allow it in response to a tap,
+// so the first tap (or pen lift) enters fullscreen. Skipped when installed as an app.
+const installed = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
+function enterFullscreen() {
+  if (installed || !settings.autoFullscreen || document.fullscreenElement || document.webkitFullscreenElement) return;
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  try { req?.call(el, { navigationUI: 'hide' })?.catch?.(() => {}); } catch {}
+}
+for (const type of ['pointerup', 'touchend', 'click']) document.addEventListener(type, enterFullscreen, true);
+$('#opt-autofs').checked = settings.autoFullscreen;
+$('#opt-autofs').onchange = e => { settings.autoFullscreen = e.target.checked; save(); if (e.target.checked) enterFullscreen(); };
+
+// Over plain http the browser withholds full-rate pen samples; point to the setup page.
+if (!window.isSecureContext) {
+  fetch('/api/info').then(r => r.json()).then(info => {
+    if (!info.https) return;
+    $('#setup-link').hidden = false;
+    $('#act-setup').hidden = false;
+  }).catch(() => {});
+}
 
 renderToolbar();
 updateUndoButtons();

@@ -22,7 +22,12 @@ button { font: inherit; color: inherit; }
 #idle.reveal .status, #idle.reveal #install { opacity: 1; }
 #idle .status { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
 #idle #install { position: absolute; bottom: calc(24px + env(safe-area-inset-bottom)); padding: 10px 18px; border-radius: 10px; border: 1px solid var(--line); background: var(--bar); }
-#idle #install[hidden] { display: none; }
+#idle #install[hidden], #idle #setup-link[hidden], #menu [hidden] { display: none; }
+#idle #setup-link { position: absolute; bottom: calc(76px + env(safe-area-inset-bottom)); color: var(--accent); font-size: 14px; text-decoration: none; opacity: 0; transition: opacity .3s; }
+#idle.reveal #setup-link { opacity: 1; }
+#idle #setup-link, #idle #install { pointer-events: none; }
+#idle.reveal #setup-link, #idle.reveal #install { pointer-events: auto; }
+#menu a.row { color: var(--accent); text-decoration: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #c0453a; }
 body.online .dot { background: #3fb950; }
 .txt-on { display: none; }

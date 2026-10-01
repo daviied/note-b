@@ -21,6 +21,6 @@ COPY --from=build /app/public ./public
 LABEL org.opencontainers.image.title="InkVault" \
       org.opencontainers.image.description="Markdown notes typed on the PC, ink drawn on the tablet"
 VOLUME /vault
-EXPOSE 4777
+EXPOSE 4777 4778
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:4777/api/info >/dev/null || exit 1
 CMD ["node", "server/index.js"]

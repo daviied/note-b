@@ -470,6 +470,7 @@ async function openConnect() {
   const box = modal.querySelector('.urls');
   box.innerHTML = urls.map(u => `<div class="url"><img alt="QR code" src="/api/qr?text=${encodeURIComponent(u)}"><code>${esc(u)}</code></div>`).join('');
   modal.querySelector('.docker').hidden = urls.length > 0;
+  modal.querySelector('.install-url').textContent = urls.length ? urls[0].replace(/\/tablet$/, '/install') : '/install';
   modal.hidden = false;
   modal.onmousedown = e => { if (e.target === modal || e.target.closest('.close')) modal.hidden = true; };
 }

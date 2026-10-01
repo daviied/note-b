@@ -57,56 +57,43 @@ function alphaAt(stroke, pr, tilt) {
 }
 
 // ---------------------------------------------------------------------------
-// Curve smoothing: fast pen movement reports points far apart. Joining them
-// with straight lines gives a faceted look, so gaps are filled by a
-// centripetal Catmull-Rom spline (which never overshoots into loops or cusps).
+// Curve smoothing. Fast writing reports pen positions far apart; joining them
+// with straight lines looks faceted. Instead each reported position is used
+// as the control point of a quadratic curve running between the midpoints of
+// its neighbours, which rounds every turn like a real pen stroke. Pressure and
+// tilt follow the same curve.
 // ---------------------------------------------------------------------------
 
-function catmullRom(p0, p1, p2, p3, t) {
-  const knot = (a, b) => Math.max(1e-4, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])));
-  const t1 = knot(p0, p1);
-  const t2 = t1 + knot(p1, p2);
-  const t3 = t2 + knot(p2, p3);
-  const u = t1 + (t2 - t1) * t;
-  const lerp = (a, b, ta, tb) => {
-    const w = (u - ta) / (tb - ta);
-    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w];
-  };
-  const a1 = lerp(p0, p1, 0, t1);
-  const a2 = lerp(p1, p2, t1, t2);
-  const a3 = lerp(p2, p3, t2, t3);
-  const b1 = lerp(a1, a2, 0, t2);
-  const b2 = lerp(a2, a3, t1, t3);
-  return lerp(b1, b2, t1, t2);
-}
-
-function needsSpline(pts, maxGap) {
+function needsSmoothing(pts, maxGap) {
   for (let i = 1; i < pts.length; i++) {
     if (Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]) > maxGap) return true;
   }
   return false;
 }
 
-// Insert curve points so no two consecutive points are more than `step` apart.
-export function splinePoints(pts, step) {
-  if (pts.length < 2) return pts;
+// Returns a dense, smooth version of pts (no two points more than ~step apart).
+export function smoothCurve(pts, step) {
+  const n = pts.length;
+  if (n < 2) return pts;
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, ((a[3] || 0) + (b[3] || 0)) / 2];
   const out = [pts[0]];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step);
-    if (n > 1) {
-      // mirror the neighbours at the stroke ends
-      const prev = pts[i - 1] || [2 * a[0] - b[0], 2 * a[1] - b[1]];
-      const next = pts[i + 2] || [2 * b[0] - a[0], 2 * b[1] - a[1]];
-      for (let k = 1; k < n; k++) {
-        const t = k / n;
-        const [x, y] = catmullRom(prev, a, b, next, t);
-        out.push([x, y, a[2] + (b[2] - a[2]) * t, (a[3] || 0) + ((b[3] || 0) - (a[3] || 0)) * t]);
-      }
+  // quadratic Bezier a -> b with control c, appended without its first point
+  const quad = (a, c, b) => {
+    const len = Math.hypot(c[0] - a[0], c[1] - a[1]) + Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const k = Math.max(1, Math.ceil(len / step));
+    for (let j = 1; j <= k; j++) {
+      const t = j / k, u = 1 - t, w0 = u * u, w1 = 2 * u * t, w2 = t * t;
+      out.push([0, 1, 2, 3].map(d => w0 * (a[d] || 0) + w1 * (c[d] || 0) + w2 * (b[d] || 0)));
     }
-    out.push(b);
+  };
+  if (n === 2) {
+    quad(pts[0], mid(pts[0], pts[1]), pts[1]);
+    return out;
   }
+  quad(pts[0], pts[1], mid(pts[1], pts[2]));
+  for (let i = 2; i < n - 1; i++) quad(mid(pts[i - 1], pts[i]), pts[i], mid(pts[i], pts[i + 1]));
+  const m = mid(pts[n - 2], pts[n - 1]);
+  quad(m, mid(m, pts[n - 1]), pts[n - 1]);
   return out;
 }
 
@@ -114,7 +101,7 @@ export function splinePoints(pts, step) {
 // per segment), all wound the same way so a nonzero fill never double-darkens
 // a translucent stroke where it overlaps itself.
 function shapes(stroke) {
-  const pts = needsSpline(stroke.pts, 3) ? splinePoints(stroke.pts, 1.5) : stroke.pts;
+  const pts = needsSmoothing(stroke.pts, 3) ? smoothCurve(stroke.pts, 1.5) : stroke.pts;
   const groups = [];
   let cur = null;
   const push = (alpha, item) => {
@@ -382,7 +369,7 @@ export function finishPoints(raw, step = 2) {
       return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4, p[2], p[3]];
     });
   }
-  return splinePoints(pts, step).map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2] * 100) / 100, Math.round(p[3] * 100) / 100]);
+  return smoothCurve(pts, step).map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2] * 100) / 100, Math.round(p[3] * 100) / 100]);
 }
 
 function ptsBBox(pts) {

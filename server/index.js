@@ -2,6 +2,7 @@
 // notes, plus static hosting for the web clients. Any client (web, Android,
 // Windows) speaks the protocol in docs/PROTOCOL.md.
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { WebSocketServer } from 'ws';
 import QRCode from 'qrcode';
 import { toSVG, fromSVG, newDrawing, applyChange, sanitizeChange, sanitizeStroke } from '../shared/ink.js';
 import { ensureIcons } from './icons.js';
+import { createCertManager } from './tls.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -19,9 +21,15 @@ const VAULT = path.resolve(process.env.VAULT_DIR || path.join(ROOT, 'vault'));
 const INK_DIR = 'Drawings';
 const TRASH_DIR = '.trash';
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // optional, e.g. https://inkvault.example.ts.net
+// Second port speaking https with a self-made certificate (see server/tls.js). 0 disables it.
+const HTTPS_PORT = process.env.HTTPS_PORT === undefined ? 4778 : Number(process.env.HTTPS_PORT);
 
 await fs.mkdir(path.join(VAULT, INK_DIR), { recursive: true });
 await ensureIcons(path.join(PUBLIC, 'icons'));
+// Kept inside the vault (hidden folder) so the tablet's trusted certificate survives container updates.
+const certs = HTTPS_PORT
+  ? await createCertManager(path.join(VAULT, '.inkvault', 'tls'), [PUBLIC_URL && new URL(PUBLIC_URL).hostname, ...lanAddresses(), os.hostname()])
+  : null;
 if (!(await exists(path.join(VAULT, 'Welcome.md')))) {
   await fs.writeFile(path.join(VAULT, 'Welcome.md'), WELCOME());
 }
@@ -166,7 +174,7 @@ const MIME = {
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png',
   '.svg': 'image/svg+xml', '.map': 'application/json', '.ico': 'image/x-icon',
 };
-const PAGES = { '/': 'index.html', '/pc': 'pc.html', '/tablet': 'tablet.html' };
+const PAGES = { '/': 'index.html', '/pc': 'pc.html', '/tablet': 'tablet.html', '/install': 'install.html' };
 
 function send(res, status, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
@@ -205,7 +213,14 @@ const routes = {
       // Inside Docker the interfaces are the container's, which a tablet can't reach.
       urls: PUBLIC_URL ? [PUBLIC_URL.replace(/\/$/, '')] : inDocker ? [] : lanAddresses().map(ip => `http://${ip}:${PORT}`),
       inDocker,
+      port: PORT,
+      https: certs ? { port: HTTPS_PORT, caName: certs.caName } : null,
     };
+  },
+  // The certificate the tablet installs once so it trusts this server's https.
+  'GET /ca.crt': async () => {
+    if (!certs) throw new HttpError(404, 'https is disabled');
+    return { __raw: certs.caPem, type: 'application/x-x509-ca-cert', headers: { 'Content-Disposition': 'attachment; filename="InkVault-CA.crt"' } };
   },
   'GET /api/qr': async (req, url) => {
     const text = url.searchParams.get('text') || '';
@@ -289,10 +304,14 @@ const routes = {
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   const key = `${req.method} ${url.pathname}`;
+  certs?.addHost(req.headers.host); // learn the addresses people use, so the https certificate covers them
   try {
     if (routes[key]) {
       const out = await routes[key](req, url);
-      if (out && out.__raw) return send(res, 200, out.__raw, out.type);
+      if (out && out.__raw) {
+        if (out.headers) for (const [k, v] of Object.entries(out.headers)) res.setHeader(k, v);
+        return send(res, 200, out.__raw, out.type);
+      }
       return send(res, 200, out);
     }
     let m;
@@ -317,12 +336,20 @@ async function handle(req, res) {
 }
 
 const server = http.createServer(handle);
+const secureServer = certs ? https.createServer(certs.context, handle) : null;
+certs?.onChange(ctx => secureServer.setSecureContext(ctx));
 
 // ---------------------------------------------------------------------------
-// WebSocket: live session between PC(s) and tablet(s)
+// WebSocket: live session between PC(s) and tablet(s), on both ports
 // ---------------------------------------------------------------------------
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8 * 1024 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+for (const srv of [server, secureServer].filter(Boolean)) {
+  srv.on('upgrade', (req, socket, head) => {
+    if (new URL(req.url, 'http://x').pathname !== '/ws') return socket.destroy();
+    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  });
+}
 let active = null; // { id, note } — the drawing currently open on the tablet
 
 function broadcastAll(msg, except = null, role = null) {
@@ -420,6 +447,9 @@ server.listen(PORT, async () => {
   if (!urls.length) console.log(`  Tablet:  http://<this PC's LAN IP>:${PORT}/tablet   (set PUBLIC_URL to show a QR code)`);
   if (urls[0]) console.log('\n' + (await QRCode.toString(`${urls[0]}/tablet`, { type: 'terminal', small: true })));
 });
+secureServer?.listen(HTTPS_PORT, () => {
+  console.log(`  HTTPS:   port ${HTTPS_PORT} (smooth pen input + app install; set up via /install on the tablet)`);
+});
 
 async function shutdown() {
   clearTimeout(flushTimer);
@@ -440,6 +470,6 @@ A drawing field appears in the note and opens on your tablet automatically.
 - Link notes with \`[[Note name]]\` — \`Ctrl+click\` to follow.
 - \`Ctrl+O\` quick switcher · \`Ctrl+E\` reading view · \`Ctrl+Shift+F\` search
 
-On the tablet: scribble over ink to erase it, two-finger tap to undo, three-finger tap to redo.
+On the tablet: scribble over ink to erase it, use two fingers to pan and zoom.
 `;
 }

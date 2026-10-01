@@ -2,6 +2,7 @@
   "name": "InkVault Tablet",
   "short_name": "InkVault",
   "description": "Pen canvas for InkVault notes",
+  "id": "/tablet",
   "start_url": "/tablet",
   "scope": "/",
   "display": "fullscreen",

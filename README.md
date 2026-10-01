@@ -60,18 +60,24 @@ npm start
 |---|---|
 | Draw / write | pen only. Fingers and palms never draw |
 | Pan / zoom | two fingers |
-| Undo / redo | two-finger tap / three-finger tap, or the buttons |
+| Undo / redo | the buttons in the toolbar |
 | Erase | scribble over ink, use the eraser tool, or the pen's eraser end / side button |
 | Shading | tilt the pen with the pencil tool. Tilting also widens the highlighter |
 | More space | the page grows as you write near the bottom, or ⋯ → Add space below |
 
 ## Installing the tablet app
 
-- **iPad (Safari)**: Share → **Add to Home Screen**. Works over plain `http://`.
-- **Android (Chrome)**: menu → **Add to Home screen**. Chrome only offers the full "Install app"
-  (standalone, offline shell) on `https://` origins. The easiest way to get that is
-  [Tailscale](https://tailscale.com) with `tailscale serve 4777`, or any reverse proxy with a real
-  certificate. Set `PUBLIC_URL` to that https address.
+Open `http://<server>:4777/install` on the tablet and follow the three steps (one-time).
+
+Why: browsers only give a page the pen's full sample rate (~240/s instead of ~60/s, so fast
+handwriting stays smooth) and only let it be installed as a fullscreen app over **https**. The server
+serves https on port **4778** with a certificate from its own small certificate authority, created on
+first start and kept in `<vault>/.inkvault/tls`. The tablet installs that authority's certificate
+once (`/ca.crt`). The server certificate automatically covers every address the server is reached by,
+so changing IPs or using `casaos.local` needs no reinstall. Set `HTTPS_PORT=0` to turn https off.
+
+Without the setup, the tablet page still goes fullscreen on the first tap (toggle in the ⋯ menu),
+and on iPad, Share → **Add to Home Screen** works over plain http.
 
 ## Layout
 

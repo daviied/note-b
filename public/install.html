@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up the tablet app</title>
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  :root { color-scheme: dark; --bg: #0e0e11; --card: #1b1b20; --line: #2c2c34; --text: #e8e8ee; --muted: #9a9aa6; --accent: #8b7bff; --ok: #3fb950; --bad: #f85149; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 24px 16px 60px; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+  .step h2 { font-size: 17px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; }
+  .num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 14px; flex-shrink: 0; }
+  .step.done .num { background: var(--ok); }
+  .step.done .num::before { content: "✓"; }
+  .step.done .num span { display: none; }
+  ol, ul { margin: 6px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .btn { display: inline-block; padding: 11px 18px; border-radius: 10px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; border: 0; font-size: 16px; cursor: pointer; margin-top: 8px; }
+  .btn.secondary { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  .muted { color: var(--muted); font-size: 14px; }
+  .status { margin-top: 10px; font-size: 15px; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); }
+  code { background: #ffffff12; padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Install InkVault on your tablet</h1>
+  <p class="lead">This gives you a fullscreen app with no browser bars and <b>much smoother handwriting</b>: browsers only send a page the pen's full speed over a secure connection.</p>
+
+  <section id="secure-ok" hidden>
+    <div class="step done">
+      <h2><span class="num"><span>1</span></span>Secure connection works</h2>
+      <p>This tablet trusts your InkVault server.</p>
+    </div>
+    <div class="step">
+      <h2><span class="num">2</span>Install the app</h2>
+      <button class="btn" id="install-btn" hidden>Install app</button>
+      <div id="install-manual">
+        <p class="android-only">In Chrome, tap the <b>⋮</b> menu → <b>Install app</b> (or <b>Add to Home screen</b> → <b>Install</b>).</p>
+        <p class="ios-only">Tap <b>Share</b> → <b>Add to Home Screen</b>.</p>
+      </div>
+      <p class="muted">Then open <b>InkVault</b> from your home screen.</p>
+      <a class="btn secondary" href="/tablet">Open the tablet page</a>
+    </div>
+  </section>
+
+  <section id="setup" hidden>
+    <div class="step" id="step1">
+      <h2><span class="num"><span>1</span></span>Download the certificate</h2>
+      <p>It lets this tablet trust your own InkVault server. It is created by your server and works only for it.</p>
+      <a class="btn" href="/ca.crt" download="InkVault-CA.crt">Download certificate</a>
+      <p class="muted">Certificate name: <b id="ca-name">…</b></p>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">2</span>Install it</h2>
+      <div class="android-only">
+        <ol>
+          <li>Open <b>Settings</b> and search for <b>“CA certificate”</b>.</li>
+          <li>Tap <b>CA certificate</b> → <b>Install anyway</b>.</li>
+          <li>Pick <b>InkVault-CA.crt</b> from Downloads.</li>
+        </ol>
+        <details>
+          <summary>Can't find it?</summary>
+          <ul>
+            <li><b>Samsung:</b> Settings → Security and privacy → More security settings → Install from device storage → CA certificate.</li>
+            <li><b>Pixel / most others:</b> Settings → Security &amp; privacy → More security settings → Encryption &amp; credentials → Install a certificate → CA certificate.</li>
+            <li>Android may ask you to set a screen lock first. That's required for installing any certificate.</li>
+          </ul>
+        </details>
+      </div>
+      <div class="ios-only">
+        <ol>
+          <li>Open <b>Settings</b> → <b>Profile Downloaded</b> → <b>Install</b>.</li>
+          <li>Then <b>Settings → General → About → Certificate Trust Settings</b> and turn on <b id="ca-name-ios">the InkVault certificate</b>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">3</span>Check and open the secure page</h2>
+      <button class="btn secondary" id="check">Check connection</button>
+      <div class="status" id="check-status"></div>
+      <a class="btn" id="go-secure" hidden>Continue on the secure page →</a>
+    </div>
+
+    <p class="muted ios-only">Just want fullscreen on iPad? Share → Add to Home Screen works without any of this, but handwriting will be smoother after these steps.</p>
+  </section>
+
+  <section id="disabled" hidden>
+    <div class="step"><p>Secure connections are turned off on this server (<code>HTTPS_PORT=0</code>).</p></div>
+  </section>
+</main>
+
+<script>
+  const isIOS = /iPad|iPhone/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(navigator.userAgent);
+  for (const el of document.querySelectorAll('.android-only')) el.hidden = isIOS;
+  for (const el of document.querySelectorAll('.ios-only')) el.hidden = isAndroid;
+
+  (async () => {
+    const info = await (await fetch('/api/info')).json();
+    if (!info.https) return void (document.querySelector('#disabled').hidden = false);
+    if (location.protocol === 'https:') {
+      document.querySelector('#secure-ok').hidden = false;
+      return;
+    }
+    document.querySelector('#setup').hidden = false;
+    document.querySelector('#ca-name').textContent = info.https.caName;
+    document.querySelector('#ca-name-ios').textContent = info.https.caName;
+    const secure = `https://${location.hostname}:${info.https.port}`;
+    const go = document.querySelector('#go-secure');
+    go.href = `${secure}/install`;
+
+    const status = document.querySelector('#check-status');
+    async function check(quiet) {
+      if (!quiet) { status.className = 'status'; status.textContent = 'Checking…'; }
+      try {
+        // A no-cors request fails outright if the tablet doesn't trust the certificate.
+        await fetch(`${secure}/api/info`, { mode: 'no-cors', cache: 'no-store' });
+        status.className = 'status ok';
+        status.textContent = '✓ This tablet trusts the server.';
+        go.hidden = false;
+        return true;
+      } catch {
+        if (!quiet) {
+          status.className = 'status bad';
+          status.textContent = 'Not trusted yet. Finish steps 1 and 2, then try again. (If you just installed it, reopen the browser.)';
+        }
+        return false;
+      }
+    }
+    document.querySelector('#check').onclick = () => check(false);
+    if (await check(true)) document.querySelector('#step1').classList.add('done');
+  })();
+
+  // Chrome's own install prompt, when available
+  let prompt = null;
+  addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    prompt = e;
+    document.querySelector('#install-btn').hidden = false;
+    document.querySelector('#install-manual').hidden = true;
+  });
+  document.querySelector('#install-btn').onclick = async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    await prompt.userChoice;
+    prompt = null;
+  };
+  if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+</body>
+</html>

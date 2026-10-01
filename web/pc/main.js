@@ -7,6 +7,7 @@ import { createEditor, EMBED_RE } from './editor.js';
 import { createInkEmbed, setInkActions } from './inkEmbed.js';
 
 const $ = s => document.querySelector(s);
+const scroller = document.querySelector('#scroller');
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const prefs = (() => { try { return JSON.parse(localStorage.getItem('inkvault.pc') || '{}'); } catch { return {}; } })();
 const savePrefs = () => { try { localStorage.setItem('inkvault.pc', JSON.stringify(prefs)); } catch {} };
@@ -88,13 +89,33 @@ function updateCounts(text) {
   $('#counts').textContent = `${words} words${inks ? ` · ${inks} drawing${inks > 1 ? 's' : ''}` : ''}`;
 }
 
-async function openNote(path, { focus = true } = {}) {
+// The server rewrote links inside notes (after a rename); refresh the open note if it was one of them.
+async function reloadIfChanged() {
+  if (!current) return;
+  const { text } = await api.get(`/api/note?path=${encodeURIComponent(current)}`);
+  if (text !== lastSaved && editor.getText() === lastSaved) {
+    const top = scroller.scrollTop;
+    lastSaved = text;
+    editor.setText(text);
+    requestAnimationFrame(() => { scroller.scrollTop = top; });
+    if (mode === 'read') renderReading();
+  }
+}
+
+async function openNote(path, { focus = true, nav = 'push', scroll = 0 } = {}) {
   if (current) await save();
   try {
     const { text } = await api.get(`/api/note?path=${encodeURIComponent(path)}`);
+    // Remember where we were on the page we're leaving, for Back.
+    if (current && history.state?.path === current) history.replaceState({ ...history.state, scroll: scroller.scrollTop }, '');
+    const url = `?note=${encodeURIComponent(path)}`;
+    if (nav === 'push' && path !== current) history.pushState({ path, scroll: 0 }, '', url);
+    else if (nav !== 'none') history.replaceState({ path, scroll: 0 }, '', url);
     current = path;
     lastSaved = text;
     editor.setText(text);
+    scroller.scrollTop = 0;
+    requestAnimationFrame(() => { scroller.scrollTop = scroll; });
     prefs.last = path;
     savePrefs();
     $('#title').value = path.replace(/\.md$/i, '').split('/').pop();
@@ -135,13 +156,25 @@ function resolveLink(name) {
     || notes.find(p => p.toLowerCase().replace(/\.md$/, '').split('/').pop() === target.split('/').pop());
 }
 
-async function openLink(name) {
-  const hit = resolveLink(name);
-  if (hit) return openNote(hit);
-  const { path } = await api.send('POST', '/api/note', { name });
-  await loadTree();
-  openNote(path);
+async function openLink(name, { newTab = false } = {}) {
+  let path = resolveLink(name);
+  if (!path) {
+    ({ path } = await api.send('POST', '/api/note', { name }));
+    await loadTree();
+  }
+  if (newTab) window.open(`/pc?note=${encodeURIComponent(path)}`, '_blank');
+  else openNote(path);
 }
+
+// Back / forward between notes (also the browser's and the mouse's back buttons, Alt+←/→).
+window.addEventListener('popstate', e => {
+  const path = e.state?.path;
+  if (!path) return;
+  if (notes.includes(path)) openNote(path, { nav: 'none', scroll: e.state.scroll || 0 });
+  else toastMsg('That note was moved or deleted.');
+});
+$('#btn-back').onclick = () => history.back();
+$('#btn-forward').onclick = () => history.forward();
 
 // Inline title = file name (rename on commit), as in Obsidian.
 $('#title').addEventListener('keydown', e => {
@@ -160,7 +193,12 @@ $('#title').addEventListener('change', async e => {
     current = r.path;
     prefs.last = r.path;
     savePrefs();
+    history.replaceState({ path: r.path, scroll: scroller.scrollTop }, '', `?note=${encodeURIComponent(r.path)}`);
     await loadTree();
+    if (r.linksUpdated) {
+      toastMsg(`Updated links in ${r.linksUpdated} note${r.linksUpdated > 1 ? 's' : ''}`);
+      reloadIfChanged();
+    }
   } catch (err) {
     toastMsg(err.message);
     e.target.value = current.replace(/\.md$/i, '').split('/').pop();
@@ -303,6 +341,10 @@ function treeMenu(e, n) {
       else if (current?.startsWith(`${n.path}/`)) current = r.path + current.slice(n.path.length);
       await loadTree();
       if (current) $('#title').value = current.replace(/\.md$/i, '').split('/').pop();
+      if (r.linksUpdated) {
+        toastMsg(`Updated links in ${r.linksUpdated} note${r.linksUpdated > 1 ? 's' : ''}`);
+        reloadIfChanged();
+      }
     } catch (err) { toastMsg(err.message); }
   }]);
   items.push(['Delete', async () => {
@@ -481,7 +523,8 @@ if (prefs.sidebar === false) document.body.classList.add('no-sidebar');
 
 (async () => {
   await loadTree();
-  const start = (prefs.last && notes.includes(prefs.last) && prefs.last) || notes[0];
-  if (start) openNote(start);
+  const fromUrl = new URLSearchParams(location.search).get('note');
+  const start = [fromUrl, prefs.last].find(p => p && notes.includes(p)) || notes[0];
+  if (start) openNote(start, { nav: 'replace' });
   else showEmpty();
 })();

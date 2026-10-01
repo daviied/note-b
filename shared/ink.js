@@ -56,11 +56,65 @@ function alphaAt(stroke, pr, tilt) {
   return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Curve smoothing: fast pen movement reports points far apart. Joining them
+// with straight lines gives a faceted look, so gaps are filled by a
+// centripetal Catmull-Rom spline (which never overshoots into loops or cusps).
+// ---------------------------------------------------------------------------
+
+function catmullRom(p0, p1, p2, p3, t) {
+  const knot = (a, b) => Math.max(1e-4, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])));
+  const t1 = knot(p0, p1);
+  const t2 = t1 + knot(p1, p2);
+  const t3 = t2 + knot(p2, p3);
+  const u = t1 + (t2 - t1) * t;
+  const lerp = (a, b, ta, tb) => {
+    const w = (u - ta) / (tb - ta);
+    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w];
+  };
+  const a1 = lerp(p0, p1, 0, t1);
+  const a2 = lerp(p1, p2, t1, t2);
+  const a3 = lerp(p2, p3, t2, t3);
+  const b1 = lerp(a1, a2, 0, t2);
+  const b2 = lerp(a2, a3, t1, t3);
+  return lerp(b1, b2, t1, t2);
+}
+
+function needsSpline(pts, maxGap) {
+  for (let i = 1; i < pts.length; i++) {
+    if (Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]) > maxGap) return true;
+  }
+  return false;
+}
+
+// Insert curve points so no two consecutive points are more than `step` apart.
+export function splinePoints(pts, step) {
+  if (pts.length < 2) return pts;
+  const out = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step);
+    if (n > 1) {
+      // mirror the neighbours at the stroke ends
+      const prev = pts[i - 1] || [2 * a[0] - b[0], 2 * a[1] - b[1]];
+      const next = pts[i + 2] || [2 * b[0] - a[0], 2 * b[1] - a[1]];
+      for (let k = 1; k < n; k++) {
+        const t = k / n;
+        const [x, y] = catmullRom(prev, a, b, next, t);
+        out.push([x, y, a[2] + (b[2] - a[2]) * t, (a[3] || 0) + ((b[3] || 0) - (a[3] || 0)) * t]);
+      }
+    }
+    out.push(b);
+  }
+  return out;
+}
+
 // A stroke becomes groups of filled shapes (circles at each point plus a quad
 // per segment), all wound the same way so a nonzero fill never double-darkens
 // a translucent stroke where it overlaps itself.
 function shapes(stroke) {
-  const pts = stroke.pts;
+  const pts = needsSpline(stroke.pts, 3) ? splinePoints(stroke.pts, 1.5) : stroke.pts;
   const groups = [];
   let cur = null;
   const push = (alpha, item) => {
@@ -313,30 +367,22 @@ export function inverseOf(d, c) {
 // ---------------------------------------------------------------------------
 
 // Light smoothing plus densification (max spacing `step`) so erasers can work point-wise.
-export function finishPoints(raw, step = 3) {
+// Light de-jitter, then fill gaps along a smooth curve (max spacing `step`)
+// so the stored stroke is smooth everywhere and erasers can work point-wise.
+export function finishPoints(raw, step = 2) {
   let pts = raw;
   if (pts.length > 2) {
+    const close = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 6;
     pts = pts.map((p, i) => {
       if (i === 0 || i === raw.length - 1) return p;
       const a = raw[i - 1];
       const b = raw[i + 1];
+      // only average dense points (jitter); averaging sparse fast points would flatten real curves
+      if (!close(a, p) || !close(p, b)) return p;
       return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4, p[2], p[3]];
     });
   }
-  const out = [];
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    if (i > 0) {
-      const q = pts[i - 1];
-      const n = Math.floor(Math.hypot(p[0] - q[0], p[1] - q[1]) / step);
-      for (let k = 1; k <= n; k++) {
-        const t = k / (n + 1);
-        out.push([q[0] + (p[0] - q[0]) * t, q[1] + (p[1] - q[1]) * t, q[2] + (p[2] - q[2]) * t, q[3] + (p[3] - q[3]) * t]);
-      }
-    }
-    out.push(p);
-  }
-  return out.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2] * 100) / 100, Math.round(p[3] * 100) / 100]);
+  return splinePoints(pts, step).map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2] * 100) / 100, Math.round(p[3] * 100) / 100]);
 }
 
 function ptsBBox(pts) {

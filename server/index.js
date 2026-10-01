@@ -71,6 +71,40 @@ async function allNotes(dir = VAULT, acc = []) {
   return acc;
 }
 
+// After a rename/move, point [[links]] (and ![[embeds]]) at the new name, like Obsidian.
+// Returns how many notes were changed.
+async function rewriteLinks(fromRel, toRel, isFolder) {
+  const oldPath = fromRel.replace(/\.md$/i, '');
+  const newPath = toRel.replace(/\.md$/i, '');
+  const oldName = oldPath.split('/').pop();
+  const newName = newPath.split('/').pop();
+  const lower = oldPath.toLowerCase();
+  const re = /(!?)\[\[([^\]\n|#]+)([#|][^\]\n]*)?\]\]/g;
+  let count = 0;
+  for (const p of await allNotes()) {
+    const abs = path.join(VAULT, p);
+    const text = await fs.readFile(abs, 'utf8');
+    if (!text.includes('[[')) continue;
+    const out = text.replace(re, (m, bang, target, rest = '') => {
+      const t = target.trim().toLowerCase();
+      let repl = null;
+      if (isFolder) {
+        if (t.startsWith(`${lower}/`)) repl = newPath + target.trim().slice(oldPath.length);
+      } else if (t === lower) {
+        repl = newPath; // written as a path: keep it a path
+      } else if (t === oldName.toLowerCase() && newName !== oldName) {
+        repl = newName;
+      }
+      return repl === null ? m : `${bang}[[${repl}${rest}]]`;
+    });
+    if (out !== text) {
+      await writeAtomic(abs, out);
+      count++;
+    }
+  }
+  return count;
+}
+
 async function uniquePath(abs) {
   if (!(await exists(abs))) return abs;
   const ext = path.extname(abs);
@@ -211,13 +245,16 @@ const routes = {
     const a = vaultPath(from);
     const b = vaultPath(to, { md: from.toLowerCase().endsWith('.md') });
     if (a === VAULT) throw new HttpError(400, 'cannot rename vault');
+    let linksUpdated = 0;
     if (a !== b) {
       if (await exists(b)) throw new HttpError(409, 'a file with that name already exists');
+      const isFolder = (await fs.stat(a)).isDirectory();
       await fs.mkdir(path.dirname(b), { recursive: true });
       await fs.rename(a, b);
+      linksUpdated = await rewriteLinks(rel(a), rel(b), isFolder);
     }
     broadcastAll({ type: 'tree' });
-    return { path: rel(b) };
+    return { path: rel(b), linksUpdated };
   },
   'POST /api/folder': async req => {
     const { path: p } = await readJSON(req);

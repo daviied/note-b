@@ -4,7 +4,7 @@ name: inkvault
 
 services:
   inkvault:
-    image: ghcr.io/daviied/inkvault:latest
+    image: ghcr.io/daviied/note-b:latest
     container_name: inkvault
     restart: unless-stopped
     ports:
@@ -48,7 +48,7 @@ x-casaos:
     en_us: Type notes on the PC, draw on the tablet
   description:
     en_us: Obsidian-style Markdown notes. Drawing fields you add on the PC open automatically on your tablet, with pen pressure, tilt, palm rejection and scribble-to-erase.
-  icon: https://raw.githubusercontent.com/daviied/inkvault/main/docs/icon.png
+  icon: https://raw.githubusercontent.com/daviied/note-b/main/docs/icon.png
   port_map: "4777"
   index: /pc
   scheme: http

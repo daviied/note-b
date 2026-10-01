@@ -59,7 +59,7 @@ const inkField = StateField.define({
 
 const linkMatcher = new MatchDecorator({
   regexp: /(?<!!)\[\[([^\]\n|#]+)(?:[#|][^\]\n]*)?\]\]/g,
-  decoration: m => Decoration.mark({ class: 'cm-wikilink', attributes: { 'data-link': m[1].trim(), title: 'Ctrl+click to open' } }),
+  decoration: m => Decoration.mark({ class: 'cm-wikilink', attributes: { 'data-link': m[1].trim(), title: 'Click to open · Alt+click to edit' } }),
 });
 const wikilinks = ViewPlugin.fromClass(class {
   constructor(view) { this.decorations = linkMatcher.createDeco(view); }
@@ -90,10 +90,15 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
   const linkCompletion = ctx => {
     const m = ctx.matchBefore(/\[\[[^\]\n]*$/);
     if (!m) return null;
-    const closed = ctx.state.sliceDoc(ctx.pos, ctx.pos + 2) === ']]';
+    // Replace whatever was typed (and an auto-inserted "]]") and leave the cursor after the link.
+    const apply = (view, completion, from, to) => {
+      const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
+      const insert = `${completion.label}]]`;
+      view.dispatch({ changes: { from, to: end, insert }, selection: { anchor: from + insert.length } });
+    };
     return {
       from: m.from + 2,
-      options: getNoteNames().map(name => ({ label: name, type: 'text', apply: closed ? name : `${name}]]` })),
+      options: getNoteNames().map(name => ({ label: name, type: 'text', apply })),
       validFor: /^[^\]\n]*$/,
     };
   };
@@ -116,14 +121,13 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     wikilinks,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, indentWithTab]),
     EditorView.domEventHandlers({
+      // Click a [[link]] to open it, like Obsidian. Alt+click (or the arrow keys) edits it instead.
       mousedown(e) {
         const link = e.target.closest?.('.cm-wikilink');
-        if (link && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault();
-          onOpenLink(link.dataset.link);
-          return true;
-        }
-        return false;
+        if (!link || e.button !== 0 || e.altKey || e.shiftKey) return false;
+        e.preventDefault();
+        onOpenLink(link.dataset.link, { newTab: e.ctrlKey || e.metaKey });
+        return true;
       },
     }),
     EditorView.updateListener.of(u => { if (u.docChanged) onChange(u.state.doc.toString()); }),

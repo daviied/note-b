@@ -1,11 +1,19 @@
 // A drawing field as shown on the PC: read-only, updates live while the
 // tablet draws, click to send it to the tablet.
-import { drawPage, PAGE_WIDTH, DEFAULT_HEIGHT } from '../../shared/ink.js';
+import { drawPage, PAGE_WIDTH, DEFAULT_HEIGHT, PAPER_DARK } from '../../shared/ink.js';
 import { drawings, session } from './store.js';
 
 let actions = { edit() {}, done() {}, remove: null };
 export function setInkActions(a) {
   actions = { ...actions, ...a };
+}
+
+// Display option shared by every drawing field on the page.
+let darkPaper = false;
+const mounted = new Set(); // re-render callbacks of the fields currently on screen
+export function setDarkPaper(on) {
+  darkPaper = !!on;
+  for (const fn of mounted) fn();
 }
 
 export function createInkEmbed(id, { onRemove } = {}) {
@@ -44,9 +52,9 @@ export function createInkEmbed(id, { onRemove } = {}) {
       canvas.height = Math.round(h * dpr);
     }
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
-    if (d) drawPage(ctx, d, { live: [...entry.live.values()] });
+    if (d) drawPage(ctx, d, { live: [...entry.live.values()], dark: darkPaper });
     else {
-      ctx.fillStyle = '#f0efe9';
+      ctx.fillStyle = darkPaper ? PAPER_DARK : '#f0efe9';
       ctx.fillRect(0, 0, PAGE_WIDTH, height);
     }
     if (entry?.missing) stateEl.textContent = 'Drawing file not found';
@@ -64,6 +72,7 @@ export function createInkEmbed(id, { onRemove } = {}) {
   });
   const ro = new ResizeObserver(schedule);
   ro.observe(paper);
+  mounted.add(schedule);
 
   paper.addEventListener('mousedown', e => e.preventDefault()); // keep editor selection steady
   paper.addEventListener('click', () => actions.edit(id));
@@ -75,6 +84,7 @@ export function createInkEmbed(id, { onRemove } = {}) {
     unsubDrawing();
     unsubSession();
     ro.disconnect();
+    mounted.delete(schedule);
     cancelAnimationFrame(raf);
   };
   return el;

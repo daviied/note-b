@@ -168,10 +168,53 @@ function strokePaths(stroke, cache) {
 
 let scratch = null;
 
-export function drawStroke(ctx, stroke, { cache = true, alphaScale = 1 } = {}) {
+// ---------------------------------------------------------------------------
+// Dark canvas: a display option only. Strokes keep their stored colours; dark
+// inks are shown light (same hue, mirrored lightness) so black ink becomes
+// white on the dark page, like the dark mode of note apps.
+// ---------------------------------------------------------------------------
+
+export const PAPER_DARK = '#1b1b1e';
+const darkCache = new Map();
+
+export function inkColor(hex, dark) {
+  if (!dark) return hex;
+  let out = darkCache.get(hex);
+  if (out) return out;
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let l = (max + min) / 2;
+  const lin = v => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  if (luminance >= 0.3) {
+    out = hex; // already bright enough to read on dark paper
+  } else {
+    const d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    l = Math.max(1 - l * 0.9, 0.66); // black -> near white, dark blue -> light blue, ...
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    const [r1, g1, b1] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    out = '#' + [r1, g1, b1].map(v => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('');
+  }
+  darkCache.set(hex, out);
+  return out;
+}
+
+export function drawStroke(ctx, stroke, { cache = true, alphaScale = 1, dark = false } = {}) {
   const groups = strokePaths(stroke, cache);
-  if (groups.length > 1 && drawLayered(ctx, stroke, groups, alphaScale)) return;
-  ctx.fillStyle = stroke.color;
+  const color = stroke.color && inkColor(stroke.color, dark);
+  if (dark && stroke.tool === 'highlighter') alphaScale *= 1.5; // translucent colour reads weaker on black
+  if (groups.length > 1 && drawLayered(ctx, stroke, groups, alphaScale, color)) return;
+  ctx.fillStyle = color;
   for (const g of groups) {
     ctx.globalAlpha = g.alpha * alphaScale;
     ctx.fill(g.path, 'nonzero');
@@ -182,7 +225,7 @@ export function drawStroke(ctx, stroke, { cache = true, alphaScale = 1 } = {}) {
 // Strokes whose opacity varies (pencil) are composed on a scratch canvas where
 // each group first cuts out what it covers, so the joins between opacity levels
 // don't stack into dark beads. Assumes ctx has no rotation.
-function drawLayered(ctx, stroke, groups, alphaScale) {
+function drawLayered(ctx, stroke, groups, alphaScale, color) {
   const m = ctx.getTransform();
   const k = Math.hypot(m.a, m.b);
   const b = ptsBBox(stroke.pts); // not cached: live strokes are still growing
@@ -198,7 +241,7 @@ function drawLayered(ctx, stroke, groups, alphaScale) {
   o.setTransform(1, 0, 0, 1, 0, 0);
   o.clearRect(0, 0, w, h);
   o.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
-  o.fillStyle = stroke.color;
+  o.fillStyle = color;
   for (const g of groups) {
     o.globalCompositeOperation = 'destination-out';
     o.globalAlpha = 1;
@@ -219,11 +262,11 @@ function drawLayered(ctx, stroke, groups, alphaScale) {
 const inkOrder = strokes => [...strokes.filter(s => s.tool === 'highlighter'), ...strokes.filter(s => s.tool !== 'highlighter')];
 
 // Draw a whole drawing into ctx, which must already be transformed into page units.
-export function drawPage(ctx, drawing, { live = [] } = {}) {
-  ctx.fillStyle = PAPER;
+export function drawPage(ctx, drawing, { live = [], dark = false } = {}) {
+  ctx.fillStyle = dark ? PAPER_DARK : PAPER;
   ctx.fillRect(0, 0, drawing.width, drawing.height);
-  for (const s of inkOrder(drawing.strokes)) drawStroke(ctx, s);
-  for (const s of live) drawStroke(ctx, s, { cache: false });
+  for (const s of inkOrder(drawing.strokes)) drawStroke(ctx, s, { dark });
+  for (const s of live) drawStroke(ctx, s, { cache: false, dark });
 }
 
 // ---------------------------------------------------------------------------

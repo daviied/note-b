@@ -4,7 +4,7 @@ import { marked } from 'marked';
 import { connect } from '../common/socket.js';
 import { api, drawings, session } from './store.js';
 import { createEditor, EMBED_RE } from './editor.js';
-import { createInkEmbed, setInkActions } from './inkEmbed.js';
+import { createInkEmbed, setInkActions, setDarkPaper } from './inkEmbed.js';
 
 const $ = s => document.querySelector(s);
 const scroller = document.querySelector('#scroller');
@@ -516,6 +516,13 @@ document.addEventListener('keydown', e => {
 });
 
 if (prefs.theme) document.documentElement.dataset.theme = prefs.theme;
+const applyPaper = () => {
+  setDarkPaper(prefs.darkPaper);
+  $('#btn-paper').classList.toggle('on', !!prefs.darkPaper);
+  $('#btn-paper').title = prefs.darkPaper ? 'White canvas for drawings' : 'Black canvas for drawings';
+};
+$('#btn-paper').onclick = () => { prefs.darkPaper = !prefs.darkPaper; savePrefs(); applyPaper(); };
+applyPaper();
 if (prefs.sidebar === false) document.body.classList.add('no-sidebar');
 
 // ---------------------------------------------------------------------------

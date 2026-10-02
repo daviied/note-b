@@ -93,5 +93,6 @@ body.online .txt-off { display: none; }
 #toast {
   position: fixed; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   background: #000c; color: #fff; padding: 8px 16px; border-radius: 20px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  z-index: 20; max-width: calc(100% - 32px); text-align: center;
 }
 #toast.show { opacity: 1; }

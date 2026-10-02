@@ -3,7 +3,7 @@
 // pan/zoom.
 import { connect } from '../common/socket.js';
 import {
-  PAGE_WIDTH, drawPage, drawStroke, applyChange, inverseOf, finishPoints,
+  PAGE_WIDTH, PAPER_DARK, drawPage, drawStroke, inkColor, applyChange, inverseOf, finishPoints,
   eraseAlong, detectScribble, uid,
 } from '../../shared/ink.js';
 
@@ -27,6 +27,7 @@ const settings = Object.assign({
   highlighter: { color: PALETTES.highlighter[0], size: 1 },
   eraser: { size: 1, mode: 'stroke' },
   scribble: true,
+  darkPaper: false,
   autoFullscreen: true,
 }, load());
 function load() {
@@ -47,8 +48,8 @@ const stage = $('#stage');
 const baseCv = $('#base');
 const liveCv = $('#live');
 const baseCtx = baseCv.getContext('2d');
-// desynchronized = low-latency canvas (draws without waiting for the page compositor) where supported
-const liveCtx = liveCv.getContext('2d', { desynchronized: true }) || liveCv.getContext('2d');
+// Not `desynchronized`: on some Android GPUs that turns this transparent overlay opaque black.
+const liveCtx = liveCv.getContext('2d');
 const toast = $('#toast');
 
 let current = null; // { id, note, drawing, undo: [], redo: [] }
@@ -65,12 +66,16 @@ const sock = connect('tablet', {
     document.body.classList.toggle('online', ok);
   },
   onMessage(m) {
-    if (m.type === 'open' && m.drawing) openDrawing(m);
-    else if (m.type === 'close') closeDrawing();
-    else if (m.type === 'state' && !m.active && current) closeDrawing();
-    else if (m.type === 'change' && current && m.id === current.id) {
-      applyChange(current.drawing, m.change);
-      dirty.base = true;
+    try {
+      if (m.type === 'open' && m.drawing) openDrawing(m);
+      else if (m.type === 'close') closeDrawing();
+      else if (m.type === 'state' && !m.active && current) closeDrawing();
+      else if (m.type === 'change' && current && m.id === current.id) {
+        applyChange(current.drawing, m.change);
+        dirty.base = true;
+      }
+    } catch (err) {
+      reportError(err);
     }
   },
 });
@@ -145,15 +150,21 @@ function renderBase() {
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,.35)';
   ctx.shadowBlur = 18 / view.scale;
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = settings.darkPaper ? PAPER_DARK : '#fff';
   ctx.fillRect(0, 0, d.width, d.height);
   ctx.restore();
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, d.width, d.height);
   ctx.clip();
-  drawPage(ctx, d);
+  drawPage(ctx, d, { dark: settings.darkPaper });
   ctx.restore();
+  if (settings.darkPaper) {
+    // a dark page needs an edge to stand out from the dark desk around it
+    ctx.strokeStyle = 'rgba(255,255,255,.12)';
+    ctx.lineWidth = 1 / view.scale;
+    ctx.strokeRect(0, 0, d.width, d.height);
+  }
 }
 
 function renderLive() {
@@ -172,7 +183,7 @@ function renderLive() {
   }
   if (input && input.kind === 'draw') {
     const s = input.predicted?.length ? { ...input.stroke, pts: input.stroke.pts.concat(input.predicted) } : input.stroke;
-    drawStroke(ctx, s, { cache: false });
+    drawStroke(ctx, s, { cache: false, dark: settings.darkPaper });
   }
   const cursor = input && input.kind === 'erase' ? input.last : hover;
   if (cursor) {
@@ -180,12 +191,12 @@ function renderLive() {
     ctx.lineWidth = 1.2 / view.scale;
     ctx.beginPath();
     if (erasing) {
-      ctx.strokeStyle = 'rgba(0,0,0,.5)';
+      ctx.strokeStyle = settings.darkPaper ? 'rgba(255,255,255,.6)' : 'rgba(0,0,0,.5)';
       ctx.arc(cursor[0], cursor[1], eraserRadius(), 0, Math.PI * 2);
       ctx.stroke();
     } else {
       const t = settings[settings.tool] || settings.pen;
-      ctx.fillStyle = t.color || '#000';
+      ctx.fillStyle = inkColor(t.color || '#000000', settings.darkPaper);
       ctx.globalAlpha = 0.6;
       ctx.arc(cursor[0], cursor[1], Math.max(1.5, (SIZES[settings.tool]?.[t.size] || 3) / 2), 0, Math.PI * 2);
       ctx.fill();
@@ -195,10 +206,26 @@ function renderLive() {
 }
 
 function frame() {
-  if (dirty.base) { dirty.base = false; renderBase(); }
-  if (dirty.live) { dirty.live = false; renderLive(); }
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frame); // first, so one bad frame can never stop rendering for good
+  try {
+    if (dirty.base) { dirty.base = false; renderBase(); }
+    if (dirty.live) { dirty.live = false; renderLive(); }
+  } catch (err) {
+    reportError(err);
+  }
 }
+
+// Show unexpected errors on screen instead of failing silently.
+let lastError = '';
+function reportError(err) {
+  const msg = `Error: ${err?.message || err}`;
+  console.error(err);
+  if (msg === lastError) return;
+  lastError = msg;
+  showToast(msg, 6000);
+}
+window.addEventListener('error', e => reportError(e.error || e.message));
+window.addEventListener('unhandledrejection', e => reportError(e.reason));
 requestAnimationFrame(frame);
 
 window.addEventListener('resize', () => {
@@ -528,7 +555,7 @@ function renderToolbar() {
   for (const c of PALETTES[tool] || []) {
     const b = document.createElement('button');
     b.className = 'swatch' + (settings[tool].color === c ? ' on' : '');
-    b.style.setProperty('--c', c);
+    b.style.setProperty('--c', inkColor(c, settings.darkPaper)); // show the colour as it will look
     b.setAttribute('aria-label', `Color ${c}`);
     b.onclick = () => { settings[tool].color = c; save(); renderToolbar(); };
     colors.appendChild(b);
@@ -555,6 +582,7 @@ function renderToolbar() {
     sizes.appendChild(b);
   });
   $('#opt-scribble').checked = settings.scribble;
+  $('#opt-dark').checked = settings.darkPaper;
   $('#opt-precise').checked = settings.eraser.mode === 'precise';
 }
 
@@ -569,6 +597,12 @@ document.addEventListener('pointerdown', e => { if (!e.target.closest('#menu, #m
 function closeMenu() { $('#menu').hidden = true; }
 
 $('#opt-scribble').onchange = e => { settings.scribble = e.target.checked; save(); };
+$('#opt-dark').onchange = e => {
+  settings.darkPaper = e.target.checked;
+  save();
+  renderToolbar();
+  dirty.base = dirty.live = true;
+};
 $('#opt-precise').onchange = e => { settings.eraser.mode = e.target.checked ? 'precise' : 'stroke'; save(); };
 $('#act-extend').onclick = () => { if (current) commit({ height: current.drawing.height + 400 }); closeMenu(); };
 $('#act-fit').onclick = () => { fitWidth(); closeMenu(); };
@@ -587,11 +621,11 @@ $('#act-fullscreen').onclick = () => {
 // ---------------------------------------------------------------------------
 
 let toastTimer = 0;
-function showToast(text) {
+function showToast(text, ms = 900) {
   toast.textContent = text;
   toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 900);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), ms);
 }
 
 let wakeLock = null;

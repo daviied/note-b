@@ -45,6 +45,7 @@
   <div id="menu" hidden>
     <label class="row"><input type="checkbox" id="opt-scribble"> Scribble to erase</label>
     <label class="row"><input type="checkbox" id="opt-precise"> Precise eraser (cuts strokes)</label>
+    <label class="row"><input type="checkbox" id="opt-dark"> Black canvas</label>
     <hr>
     <button class="row" id="act-extend">Add space below</button>
     <button class="row" id="act-fit">Fit to width</button>
@@ -56,8 +57,8 @@
     <p class="hint">Fingers never draw, so rest your palm anywhere. Two fingers pan &amp; zoom. Pen eraser end or side button erases.</p>
   </div>
   <div id="stage"><canvas id="base"></canvas><canvas id="live"></canvas></div>
-  <div id="toast"></div>
 </div>
+<div id="toast"></div>
 <script type="module" src="/build/tablet.js"></script>
 </body>
 </html>

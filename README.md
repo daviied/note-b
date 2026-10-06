@@ -54,7 +54,8 @@ npm start
 | Reading view | `Ctrl+E` |
 | Search | `Ctrl+Shift+F` |
 | New note | `Alt+N` |
-| Follow a link | `Ctrl+click` a `[[link]]` |
+| Follow a link | click a `[[link]]` (Ctrl+click: new tab) |
+| Math | `Ctrl+M` (inline) / `Ctrl+Shift+M` or **Math** button (block) opens a Desmos-style math box: `^` exponent, `/` fraction, `sqrt`, `pi`, `theta`, `<=` … convert as you type. Enter/Tab/Esc finishes. Click an equation to edit it, Alt+click for raw LaTeX. Stored as LaTeX (`$…$`, `$$…$$`), so Obsidian renders it too |
 
 | Tablet | |
 |---|---|

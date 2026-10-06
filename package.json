@@ -27,6 +27,8 @@
     "@codemirror/view": "^6.34.0",
     "@lezer/highlight": "^1.2.0",
     "esbuild": "^0.24.0",
-    "marked": "^14.1.0"
+    "katex": "^0.16.47",
+    "marked": "^14.1.0",
+    "mathlive": "^0.111.0"
   }
 }

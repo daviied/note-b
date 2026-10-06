@@ -12,6 +12,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
 import { createInkEmbed } from './inkEmbed.js';
+import { mathExtension, mathCompletion, insertMath } from './math.js';
 
 export const EMBED_RE = /^!\[\[ink-([a-z0-9]+)\.svg\]\]\s*$/;
 export const embedLine = id => `![[ink-${id}.svg]]`;
@@ -112,7 +113,8 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     highlightActiveLine(),
     highlightSelectionMatches(),
     closeBrackets(),
-    autocompletion({ override: [linkCompletion], icons: false }),
+    autocompletion({ override: [linkCompletion, mathCompletion], icons: false }),
+    mathExtension(),
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(mdStyle),
     EditorView.lineWrapping,
@@ -142,6 +144,10 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     },
     getText: () => view.state.doc.toString(),
     focus: () => view.focus(),
+    insertMath(display) {
+      insertMath(display)(view);
+      view.focus();
+    },
     // Insert a drawing embed on its own line at the cursor.
     insertDrawing(id) {
       const { state } = view;

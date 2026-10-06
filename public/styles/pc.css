@@ -99,6 +99,35 @@ body.empty #empty { display: block; }
 #editor .cm-panels input, #editor .cm-panels button { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
 body.reading #editor { display: none; }
 
+/* math */
+#editor .cm-math { cursor: pointer; border-radius: 4px; }
+#editor .cm-math:hover { background: var(--hover); }
+#editor .cm-math-block { display: block; text-align: center; padding: 6px 0; line-height: normal; }
+#editor .cm-math-block .katex-display { margin: 0; }
+#editor .cm-math-src { font-family: var(--mono); font-size: .92em; color: var(--code); }
+#editor .cm-math-preview { cursor: default; opacity: .8; }
+#editor span.cm-math-preview { margin-left: 8px; padding: 1px 6px; border: 1px dashed var(--line); }
+#editor div.cm-math-preview { border: 1px dashed var(--line); border-radius: 6px; margin: 4px 0; }
+#editor .cm-math .katex-error, #reading .katex-error { color: #f85149 !important; font-family: var(--mono); font-size: .9em; }
+.katex { font-size: 1.12em; }
+
+/* Desmos-style math box */
+#editor .cm-mathfield { display: inline-block; vertical-align: middle; min-width: 3em; }
+#editor .cm-mathfield-block { display: block; text-align: center; margin: 6px 0; }
+math-field {
+  display: inline-block; min-width: 3em; font-size: 1.15em; padding: 2px 8px;
+  border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); color: var(--text);
+  --caret-color: var(--accent);
+  --selection-background-color: #8b7bff44;
+  --contains-highlight-background-color: #8b7bff1a;
+  --placeholder-color: var(--muted);
+  outline: none;
+}
+.cm-mathfield-block math-field { display: block; margin: 0 auto; max-width: 100%; font-size: 1.3em; padding: 8px 12px; }
+math-field:focus-within { box-shadow: 0 0 0 3px var(--accent-soft); }
+math-field::part(virtual-keyboard-toggle), math-field::part(menu-toggle) { display: none; }
+#reading .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+
 /* reading view */
 #reading { display: none; font-size: 16px; line-height: 1.7; }
 body.reading #reading { display: block; }

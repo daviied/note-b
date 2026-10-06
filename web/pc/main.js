@@ -5,6 +5,7 @@ import { connect } from '../common/socket.js';
 import { api, drawings, session } from './store.js';
 import { createEditor, EMBED_RE } from './editor.js';
 import { createInkEmbed, setInkActions, setDarkPaper } from './inkEmbed.js';
+import { protectMath } from './math.js';
 
 const $ = s => document.querySelector(s);
 const scroller = document.querySelector('#scroller');
@@ -227,7 +228,8 @@ function clearReading() {
 function renderReading() {
   clearReading();
   const root = $('#reading');
-  const text = editor.getText()
+  const math = protectMath(editor.getText()); // keep LaTeX away from the Markdown parser
+  const text = math.text
     .split('\n')
     .map(line => {
       const m = EMBED_RE.exec(line);
@@ -235,7 +237,7 @@ function renderReading() {
     })
     .join('\n')
     .replace(/(?<!!)\[\[([^\]\n|#]+)(?:[#|]([^\]\n]*))?\]\]/g, (_, target, alias) => `<a class="wikilink" data-link="${esc(target.trim())}">${esc((alias || target).trim())}</a>`);
-  root.innerHTML = marked.parse(text, { gfm: true, breaks: false });
+  root.innerHTML = math.restore(marked.parse(text, { gfm: true, breaks: false }));
   root.querySelectorAll('.ink-slot').forEach(slot => slot.replaceWith(createInkEmbed(slot.dataset.id)));
   root.querySelectorAll('a.wikilink').forEach(a => {
     if (!resolveLink(a.dataset.link)) a.classList.add('unresolved');
@@ -491,6 +493,7 @@ function toastMsg(text) {
 $('#btn-new').onclick = () => newNote();
 $('#btn-folder').onclick = () => newFolder();
 $('#btn-draw').onclick = insertDrawing;
+$('#btn-math').onclick = () => { if (mode === 'read') setMode('edit'); editor.insertMath(true); };
 $('#btn-mode').onclick = () => setMode(mode === 'read' ? 'edit' : 'read');
 $('#btn-done-drawing').onclick = () => sock.send({ type: 'close' });
 $('#btn-switcher').onclick = openSwitcher;

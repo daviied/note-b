@@ -494,6 +494,10 @@ $('#btn-new').onclick = () => newNote();
 $('#btn-folder').onclick = () => newFolder();
 $('#btn-draw').onclick = insertDrawing;
 $('#btn-math').onclick = () => { if (mode === 'read') setMode('edit'); editor.insertMath(true); };
+for (const [btn, kind] of [['#btn-bullets', 'bullet'], ['#btn-numbers', 'number']]) {
+  $(btn).addEventListener('mousedown', e => e.preventDefault()); // keep the editor's selection
+  $(btn).onclick = () => { if (mode === 'read') setMode('edit'); editor.toggleList(kind); };
+}
 $('#btn-mode').onclick = () => setMode(mode === 'read' ? 'edit' : 'read');
 $('#btn-done-drawing').onclick = () => sock.send({ type: 'close' });
 $('#btn-switcher').onclick = openSwitcher;

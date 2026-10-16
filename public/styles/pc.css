@@ -99,6 +99,15 @@ body.empty #empty { display: block; }
 #editor .cm-panels input, #editor .cm-panels button { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
 body.reading #editor { display: none; }
 
+/* lists: bullets / numbers in a fixed-width gutter, wrapped lines hang under the text */
+#editor .cm-line.cm-list-line { padding-left: calc(var(--list-depth, 0) * 1.6em + 1.6em); text-indent: -1.6em; }
+#editor .cm-list-bullet, #editor .cm-list-number { display: inline-block; text-indent: 0; color: var(--accent); }
+#editor .cm-list-bullet { width: 1.6em; padding-left: .35em; font-weight: 700; }
+#editor .cm-list-number { min-width: 1.6em; font-variant-numeric: tabular-nums; }
+#editor .cm-list-number, #editor .cm-list-number * { color: var(--accent) !important; }
+#reading li { margin: 2px 0; }
+#reading li::marker { color: var(--accent); }
+
 /* math */
 #editor .cm-math { cursor: pointer; border-radius: 4px; }
 #editor .cm-math:hover { background: var(--hover); }

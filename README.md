@@ -55,6 +55,7 @@ npm start
 | Search | `Ctrl+Shift+F` |
 | New note | `Alt+N` |
 | Follow a link | click a `[[link]]` (Ctrl+click: new tab) |
+| Lists | toolbar buttons, `Ctrl+Shift+8` (bullets) / `Ctrl+Shift+7` (numbers), or just type `- ` / `1. `. Enter continues, Enter on an empty item ends the list, Tab / Shift+Tab nest (numbers renumber) |
 | Math | `Ctrl+M` (inline) / `Ctrl+Shift+M` or **Math** button (block) opens a Desmos-style math box: `^` exponent, `/` fraction, `sqrt`, `pi`, `theta`, `<=` … convert as you type. Enter/Tab/Esc finishes. Click an equation to edit it, Alt+click for raw LaTeX. Stored as LaTeX (`$…$`, `$$…$$`), so Obsidian renders it too |
 
 | Tablet | |
@@ -65,6 +66,7 @@ npm start
 | Erase | scribble over ink, use the eraser tool, or the pen's eraser end / side button |
 | Shading | tilt the pen with the pencil tool. Tilting also widens the highlighter |
 | More space | the page grows as you write near the bottom, or ⋯ → Add space below |
+| Select / move | lasso tool: circle writing (or tap a stroke), drag it to move; the bar above it has Copy, Cut, Duplicate, Delete. Paste (toolbar) works across drawings |
 
 ## Installing the tablet app
 

@@ -262,10 +262,11 @@ function drawLayered(ctx, stroke, groups, alphaScale, color) {
 const inkOrder = strokes => [...strokes.filter(s => s.tool === 'highlighter'), ...strokes.filter(s => s.tool !== 'highlighter')];
 
 // Draw a whole drawing into ctx, which must already be transformed into page units.
-export function drawPage(ctx, drawing, { live = [], dark = false } = {}) {
+// `skip`: ids of strokes not to draw (e.g. ones being dragged, drawn on another layer)
+export function drawPage(ctx, drawing, { live = [], dark = false, skip = null } = {}) {
   ctx.fillStyle = dark ? PAPER_DARK : PAPER;
   ctx.fillRect(0, 0, drawing.width, drawing.height);
-  for (const s of inkOrder(drawing.strokes)) drawStroke(ctx, s, { dark });
+  for (const s of inkOrder(drawing.strokes)) if (!skip || !skip.has(s.id)) drawStroke(ctx, s, { dark });
   for (const s of live) drawStroke(ctx, s, { cache: false, dark });
 }
 

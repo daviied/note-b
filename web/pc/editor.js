@@ -13,6 +13,7 @@ import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/
 import { tags as t } from '@lezer/highlight';
 import { createInkEmbed } from './inkEmbed.js';
 import { mathExtension, mathCompletion, insertMath } from './math.js';
+import { listExtension, toggleListRenumbered } from './lists.js';
 
 export const EMBED_RE = /^!\[\[ink-([a-z0-9]+)\.svg\]\]\s*$/;
 export const embedLine = id => `![[ink-${id}.svg]]`;
@@ -82,7 +83,6 @@ const mdStyle = HighlightStyle.define([
   { tag: t.monospace, fontFamily: 'var(--mono)', color: 'var(--code)' },
   { tag: [t.processingInstruction, t.meta, t.contentSeparator], color: 'var(--faint)' },
   { tag: t.quote, color: 'var(--muted)' },
-  { tag: t.list, color: 'var(--accent)' },
 ]);
 
 // --- public API -----------------------------------------------------------------
@@ -115,6 +115,7 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     closeBrackets(),
     autocompletion({ override: [linkCompletion, mathCompletion], icons: false }),
     mathExtension(),
+    listExtension(),
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(mdStyle),
     EditorView.lineWrapping,
@@ -147,6 +148,9 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     insertMath(display) {
       insertMath(display)(view);
       view.focus();
+    },
+    toggleList(kind) {
+      toggleListRenumbered(kind)(view);
     },
     // Insert a drawing embed on its own line at the cursor.
     insertDrawing(id) {

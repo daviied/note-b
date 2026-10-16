@@ -4,7 +4,7 @@
 import { connect } from '../common/socket.js';
 import {
   PAGE_WIDTH, PAPER_DARK, drawPage, drawStroke, inkColor, applyChange, inverseOf, finishPoints,
-  eraseAlong, detectScribble, uid,
+  eraseAlong, detectScribble, uid, strokeBBox,
 } from '../../shared/ink.js';
 
 const PALETTES = {
@@ -72,6 +72,7 @@ const sock = connect('tablet', {
       else if (m.type === 'state' && !m.active && current) closeDrawing();
       else if (m.type === 'change' && current && m.id === current.id) {
         applyChange(current.drawing, m.change);
+        refreshSelection();
         dirty.base = true;
       }
     } catch (err) {
@@ -82,7 +83,7 @@ const sock = connect('tablet', {
 
 function openDrawing({ id, note, drawing }) {
   const same = current && current.id === id;
-  if (!same) cancelInput();
+  if (!same) { cancelInput(); setSelection(null); }
   current = same ? Object.assign(current, { drawing, note }) : { id, note, drawing, undo: [], redo: [] };
   $('#title').textContent = (note || '').replace(/\.md$/i, '').split('/').pop() || 'Drawing';
   idle.hidden = true;
@@ -95,6 +96,7 @@ function openDrawing({ id, note, drawing }) {
 
 function closeDrawing() {
   cancelInput();
+  setSelection(null);
   current = null;
   board.hidden = true;
   idle.hidden = false;
@@ -157,7 +159,8 @@ function renderBase() {
   ctx.beginPath();
   ctx.rect(0, 0, d.width, d.height);
   ctx.clip();
-  drawPage(ctx, d, { dark: settings.darkPaper });
+  // strokes being dragged are drawn on the live layer instead
+  drawPage(ctx, d, { dark: settings.darkPaper, skip: input?.kind === 'move' ? selection.ids : null });
   ctx.restore();
   if (settings.darkPaper) {
     // a dark page needs an edge to stand out from the dark desk around it
@@ -185,7 +188,8 @@ function renderLive() {
     const s = input.predicted?.length ? { ...input.stroke, pts: input.stroke.pts.concat(input.predicted) } : input.stroke;
     drawStroke(ctx, s, { cache: false, dark: settings.darkPaper });
   }
-  const cursor = input && input.kind === 'erase' ? input.last : hover;
+  renderSelection(ctx);
+  const cursor = input && input.kind === 'erase' ? input.last : settings.tool === 'lasso' && !hover?.eraser ? null : hover;
   if (cursor) {
     const erasing = (input && input.kind === 'erase') || hover?.eraser;
     ctx.lineWidth = 1.2 / view.scale;
@@ -249,11 +253,13 @@ function commit(change, { record = true, inverse = null } = {}) {
     if (current.undo.length > 200) current.undo.shift();
     current.redo = [];
   }
+  refreshSelection();
   dirty.base = true;
   updateUndoButtons();
 }
 
 function undo() {
+  if (input) return; // not in the middle of a stroke / drag
   const e = current?.undo.pop();
   if (!e) return;
   commit(e.inv, { record: false });
@@ -319,6 +325,16 @@ function onPenDown(e) {
   if (settings.tool === 'eraser' || isPenEraser(e)) {
     input = { kind: 'erase', pointerId: e.pointerId, last: p, removed: new Map(), added: new Map() };
     eraseTo(p);
+  } else if (settings.tool === 'lasso') {
+    // inside the current selection: drag it; anywhere else: draw a new lasso
+    const b = selection && selectionBox();
+    if (b && p[0] >= b.minX && p[0] <= b.maxX && p[1] >= b.minY && p[1] <= b.maxY) {
+      input = { kind: 'move', pointerId: e.pointerId, start: p, dx: 0, dy: 0 };
+      dirty.base = true; // take the selection off the base layer while it moves
+    } else {
+      setSelection(null);
+      input = { kind: 'lasso', pointerId: e.pointerId, pts: [p] };
+    }
   } else {
     const t = settings[settings.tool];
     input = {
@@ -346,7 +362,11 @@ function onPenMove(e) {
   for (const ev of events.length ? events : [e]) {
     const p = pagePoint(ev);
     if (input.kind === 'erase') eraseTo(p);
-    else {
+    else if (input.kind === 'lasso') input.pts.push(p);
+    else if (input.kind === 'move') {
+      input.dx = p[0] - input.start[0];
+      input.dy = p[1] - input.start[1];
+    } else {
       const pts = input.stroke.pts;
       const q = pts[pts.length - 1];
       // pen pressure is noisy; ease it so the line edge doesn't wobble
@@ -374,6 +394,8 @@ function onPenUp(e) {
   const done = input;
   input = null;
   if (done.kind === 'erase') finishErase(done);
+  else if (done.kind === 'lasso') finishLasso(done.pts);
+  else if (done.kind === 'move') finishMove(done.dx, done.dy);
   else finishStroke(done.stroke);
   dirty.live = true;
 }
@@ -381,6 +403,7 @@ function onPenUp(e) {
 function cancelInput() {
   if (input?.kind === 'draw') sock.send({ type: 'live', id: current?.id, sid: input.stroke.id, stroke: null });
   if (input?.kind === 'erase') finishErase(input);
+  if (input?.kind === 'move') dirty.base = true; // put the selection back where it was
   input = null;
   hover = null;
 }
@@ -492,6 +515,202 @@ function endGesture() {
 }
 
 // ---------------------------------------------------------------------------
+// Lasso selection: circle writing to select it, then drag it, or copy / cut /
+// duplicate / delete it from the bar above it. Paste works across drawings.
+// ---------------------------------------------------------------------------
+
+let selection = null; // { ids: Set, halo: [stroke] } — halo strokes are the glow drawn behind the selection
+let clipboard = (() => { try { return JSON.parse(localStorage.getItem('inkvault.clipboard') || 'null'); } catch { return null; } })();
+const SEL_COLOR = '#8b7bff';
+const selbar = $('#selbar');
+
+function selectedStrokes() {
+  return selection ? current.drawing.strokes.filter(s => selection.ids.has(s.id)) : [];
+}
+
+function setSelection(ids) {
+  const list = ids && current ? current.drawing.strokes.filter(s => ids.has(s.id)) : [];
+  selection = list.length
+    ? { ids: new Set(list.map(s => s.id)), halo: list.map(s => ({ ...s, id: `${s.id}h`, color: SEL_COLOR, size: s.size + 7, tool: 'pen' })) }
+    : null;
+  dirty.live = true;
+}
+
+// after any change: drop strokes that no longer exist, pick up moved ones
+function refreshSelection() {
+  if (selection && input?.kind !== 'move') setSelection(selection.ids);
+}
+
+function selectionBox(dx = 0, dy = 0) {
+  let b = null;
+  for (const s of selectedStrokes()) {
+    const r = strokeBBox(s);
+    const pad = s.size + 8;
+    b = b
+      ? { minX: Math.min(b.minX, r.minX - pad), minY: Math.min(b.minY, r.minY - pad), maxX: Math.max(b.maxX, r.maxX + pad), maxY: Math.max(b.maxY, r.maxY + pad) }
+      : { minX: r.minX - pad, minY: r.minY - pad, maxX: r.maxX + pad, maxY: r.maxY + pad };
+  }
+  return b && { minX: b.minX + dx, minY: b.minY + dy, maxX: b.maxX + dx, maxY: b.maxY + dy };
+}
+
+function insidePolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function finishLasso(pts) {
+  let span = 0;
+  for (const p of pts) span = Math.max(span, Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]));
+  if (span < 8) {
+    // a tap: select the stroke under the pen
+    const [x, y] = pts[0];
+    const hit = eraseAlong(current.drawing.strokes, x, y, x, y, 6, 'stroke');
+    setSelection(hit ? new Set([hit.remove[hit.remove.length - 1]]) : null);
+    return;
+  }
+  // a stroke is selected when most of it lies inside the loop
+  const ids = new Set();
+  for (const s of current.drawing.strokes) {
+    const inside = s.pts.filter(p => insidePolygon(p[0], p[1], pts)).length;
+    if (inside / s.pts.length >= 0.5) ids.add(s.id);
+  }
+  setSelection(ids.size ? ids : null);
+  if (!ids.size) showToast('Nothing selected');
+}
+
+const shifted = (s, dx, dy, extra = {}) => ({
+  ...s,
+  ...extra,
+  pts: s.pts.map(p => [Math.round((p[0] + dx) * 10) / 10, Math.round((p[1] + dy) * 10) / 10, p[2], p[3]]),
+});
+
+function growFor(strokes, change) {
+  const maxY = Math.max(...strokes.flatMap(s => s.pts.map(p => p[1])));
+  if (maxY > current.drawing.height - 80) change.height = Math.ceil(maxY + 300);
+  return change;
+}
+
+function finishMove(dx, dy) {
+  dirty.base = true;
+  if (Math.hypot(dx, dy) < 1) return;
+  const ids = selection.ids;
+  const moved = selectedStrokes().map(s => shifted(s, dx, dy)); // same ids: replaces the originals
+  commit(growFor(moved, { add: moved }));
+  setSelection(ids);
+}
+
+// new copies of strokes (new ids, painted on top in their original order)
+function copies(strokes, dx, dy) {
+  const base = Date.now() * 1000;
+  return [...strokes].sort((a, b) => a.z - b.z).map((s, i) => shifted(s, dx, dy, { id: uid(), z: base + i }));
+}
+
+function copySelection() {
+  const list = selectedStrokes();
+  if (!list.length) return;
+  clipboard = list;
+  try { localStorage.setItem('inkvault.clipboard', JSON.stringify(list)); } catch {}
+  updatePasteButton();
+  showToast(`Copied ${list.length} stroke${list.length > 1 ? 's' : ''}`);
+}
+function deleteSelection() {
+  if (!selection) return;
+  commit({ remove: [...selection.ids] });
+  setSelection(null);
+}
+function cutSelection() {
+  copySelection();
+  deleteSelection();
+}
+function duplicateSelection() {
+  const list = selectedStrokes();
+  if (!list.length) return;
+  const dupes = copies(list, 24, 24);
+  commit(growFor(dupes, { add: dupes }));
+  setSelection(new Set(dupes.map(s => s.id)));
+}
+function paste() {
+  if (!current || !clipboard?.length) return;
+  // centre of the visible part of the page
+  const cx = (stageRect.width / 2 - view.ox) / view.scale;
+  const cy = (stageRect.height / 2 - view.oy) / view.scale;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of clipboard) for (const p of s.pts) {
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+  }
+  const dx = clamp(cx - (minX + maxX) / 2, 10 - minX, PAGE_WIDTH - 10 - maxX); // keep it on the page
+  const dy = Math.max(cy - (minY + maxY) / 2, 10 - minY);
+  const pasted = copies(clipboard, dx, dy);
+  commit(growFor(pasted, { add: pasted }));
+  settings.tool = 'lasso';
+  save();
+  renderToolbar();
+  setSelection(new Set(pasted.map(s => s.id))); // selected, ready to drag into place
+}
+
+function updatePasteButton() {
+  $('#paste').hidden = !clipboard?.length;
+}
+
+function renderSelection(ctx) {
+  if (input?.kind === 'lasso') {
+    ctx.save();
+    ctx.strokeStyle = SEL_COLOR;
+    ctx.lineWidth = 2 / view.scale;
+    ctx.setLineDash([6 / view.scale, 5 / view.scale]);
+    ctx.beginPath();
+    input.pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (!selection) {
+    selbar.hidden = true;
+    return;
+  }
+  const moving = input?.kind === 'move';
+  const dx = moving ? input.dx : 0;
+  const dy = moving ? input.dy : 0;
+  ctx.save();
+  ctx.translate(dx, dy);
+  for (const h of selection.halo) drawStroke(ctx, h, { alphaScale: 0.28 });
+  if (moving) for (const s of selectedStrokes()) drawStroke(ctx, s, { dark: settings.darkPaper });
+  ctx.restore();
+  const b = selectionBox(dx, dy);
+  if (!b) return;
+  ctx.save();
+  ctx.strokeStyle = SEL_COLOR;
+  ctx.lineWidth = 1.2 / view.scale;
+  ctx.setLineDash([5 / view.scale, 4 / view.scale]);
+  ctx.strokeRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
+  ctx.restore();
+  // action bar above the selection (below it if there's no room), hidden while dragging
+  selbar.hidden = moving;
+  if (!moving) {
+    const x = stageRect.left + view.ox + ((b.minX + b.maxX) / 2) * view.scale;
+    const top = stageRect.top + view.oy + b.minY * view.scale;
+    const bottom = stageRect.top + view.oy + b.maxY * view.scale;
+    const h = selbar.offsetHeight || 44;
+    const y = top - h - 10 > stageRect.top ? top - h - 10 : Math.min(bottom + 10, innerHeight - h - 10);
+    selbar.style.left = `${clamp(x - selbar.offsetWidth / 2, 8, innerWidth - selbar.offsetWidth - 8)}px`;
+    selbar.style.top = `${y}px`;
+  }
+}
+
+selbar.addEventListener('pointerdown', e => e.stopPropagation());
+selbar.querySelector('[data-act=copy]').onclick = copySelection;
+selbar.querySelector('[data-act=cut]').onclick = cutSelection;
+selbar.querySelector('[data-act=duplicate]').onclick = duplicateSelection;
+selbar.querySelector('[data-act=delete]').onclick = deleteSelection;
+$('#paste').onclick = paste;
+updatePasteButton();
+
+// ---------------------------------------------------------------------------
 // Event wiring
 // ---------------------------------------------------------------------------
 
@@ -539,8 +758,16 @@ stage.addEventListener('wheel', e => {
 }, { passive: false });
 
 document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && k === 'y') { e.preventDefault(); redo(); }
+  else if (mod && k === 'c') { e.preventDefault(); copySelection(); }
+  else if (mod && k === 'x') { e.preventDefault(); cutSelection(); }
+  else if (mod && k === 'v') { e.preventDefault(); paste(); }
+  else if (mod && k === 'd') { e.preventDefault(); duplicateSelection(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && selection) { e.preventDefault(); deleteSelection(); }
+  else if (e.key === 'Escape' && selection) setSelection(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -570,10 +797,11 @@ function renderToolbar() {
     if (!PALETTES[tool].includes(settings[tool].color)) custom.classList.add('on');
     colors.appendChild(custom);
   }
-  colors.hidden = tool === 'eraser';
+  colors.hidden = !PALETTES[tool];
   const sizes = $('#sizes');
   sizes.innerHTML = '';
-  SIZES[tool].forEach((sz, i) => {
+  sizes.hidden = !SIZES[tool];
+  (SIZES[tool] || []).forEach((sz, i) => {
     const b = document.createElement('button');
     b.className = 'size' + (settings[tool].size === i ? ' on' : '');
     b.innerHTML = `<i style="width:${6 + i * 5}px;height:${6 + i * 5}px"></i>`;
@@ -587,7 +815,12 @@ function renderToolbar() {
 }
 
 document.querySelectorAll('[data-tool]').forEach(b => {
-  b.onclick = () => { settings.tool = b.dataset.tool; save(); renderToolbar(); };
+  b.onclick = () => {
+    settings.tool = b.dataset.tool;
+    if (settings.tool !== 'lasso') setSelection(null);
+    save();
+    renderToolbar();
+  };
 });
 $('#undo').onclick = undo;
 $('#redo').onclick = redo;

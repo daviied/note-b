@@ -72,6 +72,9 @@ body.online .txt-off { display: none; }
 #toolbar .swatch.custom::before { background: conic-gradient(#f44, #fd4, #4f6, #4df, #64f, #f4d, #f44); }
 #toolbar .swatch.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
 #toolbar .size i { display: block; border-radius: 50%; background: currentColor; }
+#toolbar .dash { width: 34px; }
+#toolbar .dash svg { stroke-width: 2.4; }
+#toolbar .dash svg circle { fill: currentColor; stroke: none; }
 
 #menu {
   position: fixed; right: 10px; top: calc(56px + env(safe-area-inset-top)); z-index: 10; width: 280px;

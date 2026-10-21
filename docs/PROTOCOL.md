@@ -34,6 +34,7 @@ source data in `<metadata id="inkvault-data">` (XML-escaped JSON):
     "tool": "pen",              // "pen" | "pencil" | "highlighter"
     "color": "#1f1f1f",
     "size": 3,                  // nominal diameter in logical units
+    "dash": "dash",             // optional: "dash" | "dot"; absent = solid line
     "pts": [[x, y, pressure, tilt], ...]   // pressure 0..1, tilt 0 (upright)..1 (flat)
   }]
 }

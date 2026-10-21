@@ -342,6 +342,7 @@ function onPenDown(e) {
       pointerId: e.pointerId,
       stroke: { id: uid(), z: Date.now() * 1000 + Math.floor(Math.random() * 1000), tool: settings.tool, color: t.color, size: SIZES[settings.tool][t.size], pts: [p] },
     };
+    if (t.dash && t.dash !== 'solid') input.stroke.dash = t.dash;
   }
   dirty.live = true;
 }
@@ -809,6 +810,26 @@ function renderToolbar() {
     b.onclick = () => { settings[tool].size = i; save(); renderToolbar(); };
     sizes.appendChild(b);
   });
+  // line style: solid / dashed / dotted (pen, pencil, highlighter)
+  const dashes = $('#dashes');
+  dashes.innerHTML = '';
+  dashes.hidden = !PALETTES[tool];
+  if (PALETTES[tool]) {
+    const icons = {
+      solid: '<path d="M3 12h18"/>',
+      dash: '<path d="M3 12h4M10 12h4M17 12h4"/>',
+      dot: '<circle cx="4" cy="12" r="1.4"/><circle cx="9.3" cy="12" r="1.4"/><circle cx="14.7" cy="12" r="1.4"/><circle cx="20" cy="12" r="1.4"/>',
+    };
+    for (const [dash, label] of [['solid', 'Solid line'], ['dash', 'Dashed line'], ['dot', 'Dotted line']]) {
+      const b = document.createElement('button');
+      b.className = 'dash' + ((settings[tool].dash || 'solid') === dash ? ' on' : '');
+      b.innerHTML = `<svg viewBox="0 0 24 24">${icons[dash]}</svg>`;
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      b.onclick = () => { settings[tool].dash = dash; save(); renderToolbar(); };
+      dashes.appendChild(b);
+    }
+  }
   $('#opt-scribble').checked = settings.scribble;
   $('#opt-dark').checked = settings.darkPaper;
   $('#opt-precise').checked = settings.eraser.mode === 'precise';

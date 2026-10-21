@@ -109,10 +109,20 @@ function shapes(stroke) {
     cur.items.push(item);
   };
   if (!pts.length) return groups;
+  if (stroke.dash === 'dot') {
+    for (const p of dotPoints(pts, stroke)) push(alphaAt(stroke, p[2], p[3]), ['c', p[0], p[1], radiusAt(stroke, p)]);
+    return groups;
+  }
+  for (const piece of stroke.dash === 'dash' ? dashPieces(pts, stroke) : [pts]) pushPiece(piece, stroke, push);
+  return groups;
+}
+
+// One continuous run of ink: a circle at each point and a quad per segment.
+function pushPiece(pts, stroke, push) {
   let r0 = radiusAt(stroke, pts[0]);
   if (pts.length === 1) {
     push(alphaAt(stroke, pts[0][2], pts[0][3]), ['c', pts[0][0], pts[0][1], r0]);
-    return groups;
+    return;
   }
   for (let i = 1; i < pts.length; i++) {
     const p0 = pts[i - 1];
@@ -135,7 +145,68 @@ function shapes(stroke) {
     push(a, ['c', p1[0], p1[1], r1]);
     r0 = r1;
   }
-  return groups;
+}
+
+// ---------------------------------------------------------------------------
+// Dashed and dotted strokes: the pattern is measured along the line and scales
+// with the pen size, so it stays even however fast or slow you draw.
+// ---------------------------------------------------------------------------
+
+export const DASHES = ['solid', 'dash', 'dot'];
+
+const lerpPt = (a, b, t) => [0, 1, 2, 3].map(d => (a[d] || 0) + ((b[d] || 0) - (a[d] || 0)) * t);
+
+// Walk along pts, calling visit(point, distanceSoFar) at every `step` of length.
+function walk(pts, step, visit) {
+  let next = 0;
+  let dist = 0;
+  visit(pts[0], 0);
+  next += step;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    while (len > 0 && dist + len >= next) {
+      visit(lerpPt(a, b, (next - dist) / len), next);
+      next += step;
+    }
+    dist += len;
+  }
+}
+
+function dotPoints(pts, stroke) {
+  const out = [];
+  walk(pts, Math.max(4, stroke.size * 2.6), p => out.push(p));
+  return out;
+}
+
+function dashPieces(pts, stroke) {
+  const on = Math.max(6, stroke.size * 4);
+  const off = Math.max(5, stroke.size * 3) + stroke.size; // + size: round caps eat into the gap
+  const pieces = [];
+  let piece = [pts[0]];
+  let dist = 0;
+  let drawing = true;
+  let boundary = on;
+  for (let i = 1; i < pts.length; i++) {
+    let a = pts[i - 1];
+    const b = pts[i];
+    let len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    while (len > 0 && dist + len >= boundary) {
+      const p = lerpPt(a, b, (boundary - dist) / len);
+      if (drawing) { piece.push(p); pieces.push(piece); }
+      else piece = [p];
+      len -= boundary - dist;
+      dist = boundary;
+      a = p;
+      drawing = !drawing;
+      boundary += drawing ? on : off;
+    }
+    dist += len;
+    if (drawing) piece.push(b);
+  }
+  if (drawing && piece.length) pieces.push(piece);
+  return pieces;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +407,7 @@ export function sanitizeStroke(s) {
     pts.push([x, y, num(p[2], 0, 1, 0.5), num(p[3], 0, 1, 0)]);
   }
   if (!pts.length) return null;
-  return {
+  const out = {
     id: s.id,
     z: num(s.z, 0, Number.MAX_SAFE_INTEGER, Date.now()),
     tool: TOOLS.includes(s.tool) ? s.tool : 'pen',
@@ -344,6 +415,8 @@ export function sanitizeStroke(s) {
     size: num(s.size, 0.3, 200, 3),
     pts,
   };
+  if (s.dash === 'dash' || s.dash === 'dot') out.dash = s.dash; // absent = solid
+  return out;
 }
 
 export function sanitizeChange(c) {

@@ -37,6 +37,29 @@
   <button id="cancel" class="link">Cancel</button>
 </section>
 
+<!-- Step 1: drag the corners onto the board -->
+<section id="edit" class="full" hidden>
+  <p class="for">Drag the corners onto the board or page</p>
+  <div class="stage"><canvas id="edit-canvas"></canvas></div>
+  <div class="row">
+    <button id="edit-whole" class="btn">Whole photo</button>
+    <button id="edit-auto" class="btn">Auto-detect</button>
+    <button id="edit-next" class="btn primary">Next</button>
+  </div>
+  <button id="edit-back" class="link">Choose another photo</button>
+</section>
+
+<!-- Step 2: straightened result -->
+<section id="result" class="full" hidden>
+  <div class="stage"><canvas id="result-canvas"></canvas></div>
+  <div class="row">
+    <button id="res-back" class="btn">Adjust corners</button>
+    <button id="res-rotate" class="btn">Rotate</button>
+    <label class="btn toggle"><input type="checkbox" id="res-enhance" checked> Clean up</label>
+  </div>
+  <button id="res-send" class="btn primary wide">Send to PC</button>
+</section>
+
 <!-- Uploading -->
 <section id="sending" hidden>
   <img id="preview" alt="">

@@ -38,6 +38,7 @@
       <button class="icon" id="btn-bullets" title="Bullet list (Ctrl+Shift+8)"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></svg></button>
       <button class="icon" id="btn-numbers" title="Numbered list (Ctrl+Shift+7)"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 5l1.5-1V9M3.5 9h3M3.5 13.2c.4-.8 2.8-1 2.8.4 0 1-2.8 2-2.8 3.4h3"/></svg></button>
       <button class="pill" id="btn-math" title="Insert math block (Ctrl+Shift+M) · inline math: Ctrl+M or $x^2$"><svg viewBox="0 0 24 24"><path d="M18 5H7l6 7-6 7h11"/></svg>Math</button>
+      <button class="pill" id="btn-photo" title="Insert a picture from your phone (Ctrl+Alt+P) · you can also paste or drop images"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Picture</button>
       <button class="pill" id="btn-draw" title="Insert drawing field (Ctrl+Alt+D)"><svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L16.5 4.1a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z"/></svg>Insert drawing</button>
       <button class="icon" id="btn-mode" title="Reading view (Ctrl+E)"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
     </header>
@@ -54,7 +55,8 @@
       </div>
     </div>
     <footer id="status">
-      <button id="tablet-chip" class="off" title="Connect a tablet"><i></i><span>…</span></button>
+      <button id="tablet-chip" class="chip off" title="Connect a tablet"><i></i><span>…</span></button>
+      <button id="phone-chip" class="chip" title="Connect a phone for pictures" hidden><i></i><span>…</span></button>
       <span class="grow"></span>
       <span id="counts"></span>
       <span id="save-state"></span>
@@ -70,8 +72,8 @@
 
 <div class="modal" id="connect" hidden>
   <div class="dialog connect">
-    <h2>Connect your tablet</h2>
-    <p>On the tablet, open this address in Chrome (Android) or Safari (iPad), on the same Wi-Fi:</p>
+    <h2>Connect your devices</h2>
+    <p>Scan with the tablet (for drawing) or the phone (for pictures), on the same Wi-Fi. Chrome on Android or Safari on iPhone/iPad:</p>
     <div class="urls"></div>
     <p class="docker" hidden>Use <code>http://&lt;your PC's LAN IP&gt;:4777/tablet</code> (find the IP with <code>ipconfig</code>). To get a QR code here, set <code>PUBLIC_URL</code> in <code>docker-compose.yml</code>, or open this page via the LAN IP instead of localhost.</p>
     <p class="muted">For <b>smoother handwriting and a fullscreen app</b>, open <code class="install-url">/install</code> on the tablet and follow the three steps (one-time).</p>

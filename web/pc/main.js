@@ -6,6 +6,8 @@ import { api, drawings, session } from './store.js';
 import { createEditor, EMBED_RE } from './editor.js';
 import { createInkEmbed, setInkActions, setDarkPaper } from './inkEmbed.js';
 import { protectMath } from './math.js';
+import { IMAGE_INLINE_RE, imageUrl, photoReqId, setWaiting, imageChanged, setImageActions } from './imageEmbed.js';
+import { uid } from '../../shared/ink.js';
 
 const $ = s => document.querySelector(s);
 const scroller = document.querySelector('#scroller');
@@ -29,12 +31,68 @@ let lastSaved = '';
 const sock = connect('pc', {
   onStatus: connected => session.set({ connected }),
   onMessage(m) {
-    if (m.type === 'state') session.set({ active: m.active, tablets: m.tablets, pcs: m.pcs });
+    if (m.type === 'state') session.set({ active: m.active, tablets: m.tablets, pcs: m.pcs, cameras: m.cameras || 0 });
     else if (m.type === 'change') drawings.onChange(m.id, m.change);
     else if (m.type === 'live') drawings.onLive(m.id, m.sid, m.stroke);
     else if (m.type === 'tree') loadTree();
+    else if (m.type === 'photo-done') photoArrived(m.reqId, m.name);
+    else if (m.type === 'photo-cancel') photoCancelled(m.reqId);
   },
 });
+
+// ---------------------------------------------------------------------------
+// Pictures from the phone (and pasted / dropped images)
+// ---------------------------------------------------------------------------
+
+const photoName = reqId => `photo-${reqId}.jpg`;
+
+async function insertPhoto() {
+  if (!current) await newNote();
+  if (mode === 'read') setMode('edit');
+  const reqId = uid();
+  const name = photoName(reqId);
+  setWaiting(name, true);
+  editor.insertLine(`![[${name}]]`); // placeholder shows "waiting for phone" until it arrives
+  await save();
+  sock.send({ type: 'photo-request', reqId, note: current });
+  if (!session.state.cameras) toastMsg('Waiting for a phone. Open the camera page on your phone (see "Connect devices" in the status bar).');
+}
+
+function photoArrived(reqId, name) {
+  setWaiting(name || photoName(reqId), false);
+  imageChanged(name || photoName(reqId));
+}
+
+function photoCancelled(reqId) {
+  const name = photoName(reqId);
+  setWaiting(name, false);
+  if (editor.removeLine(`![[${name}]]`)) toastMsg('Picture cancelled');
+}
+
+setImageActions({
+  cancel(name) {
+    const reqId = photoReqId(name);
+    if (reqId) sock.send({ type: 'photo-cancel', reqId });
+    setWaiting(name, false);
+    editor.removeLine(`![[${name}]]`);
+  },
+});
+
+async function uploadImages(files) {
+  if (!current) await newNote();
+  for (const file of files) {
+    const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[file.type];
+    if (!ext) { toastMsg(`Can't use ${file.type || 'that file'}. Use PNG, JPEG, GIF or WebP.`); continue; }
+    const name = `pasted-${uid()}.${ext}`;
+    try {
+      const r = await fetch(`/api/attachment?name=${encodeURIComponent(name)}`, { method: 'PUT', body: file });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+      editor.insertLine(`![[${name}]]`);
+    } catch (e) {
+      toastMsg(`Could not add the image: ${e.message}`);
+    }
+  }
+}
 
 setInkActions({
   edit(id) {
@@ -49,6 +107,10 @@ session.subscribe(s => {
   chip.classList.toggle('ok', s.connected && s.tablets > 0);
   chip.classList.toggle('off', !s.connected);
   chip.querySelector('span').textContent = !s.connected ? 'Server offline' : s.tablets ? `Tablet connected${s.tablets > 1 ? ` (${s.tablets})` : ''}` : 'No tablet';
+  const phone = $('#phone-chip');
+  phone.hidden = !s.connected;
+  phone.classList.toggle('ok', s.cameras > 0);
+  phone.querySelector('span').textContent = s.cameras ? 'Phone connected' : 'No phone';
   $('#btn-done-drawing').hidden = !s.active;
 });
 
@@ -66,6 +128,7 @@ const editor = createEditor($('#editor'), {
   },
   onOpenLink: openLink,
   getNoteNames: () => notes.map(p => p.replace(/\.md$/i, '').split('/').pop()),
+  onImageFiles: files => uploadImages(files),
 });
 
 function save(text = editor.getText()) {
@@ -236,6 +299,7 @@ function renderReading() {
       return m ? `\n<div class="ink-slot" data-id="${m[1]}"></div>\n` : line;
     })
     .join('\n')
+    .replace(IMAGE_INLINE_RE, (_, name, width) => `<img class="note-img" alt="" src="${imageUrl(name)}"${width ? ` style="width:${width}px"` : ''}>`)
     .replace(/(?<!!)\[\[([^\]\n|#]+)(?:[#|]([^\]\n]*))?\]\]/g, (_, target, alias) => `<a class="wikilink" data-link="${esc(target.trim())}">${esc((alias || target).trim())}</a>`);
   root.innerHTML = math.restore(marked.parse(text, { gfm: true, breaks: false }));
   root.querySelectorAll('.ink-slot').forEach(slot => slot.replaceWith(createInkEmbed(slot.dataset.id)));
@@ -468,9 +532,12 @@ async function openConnect() {
   const info = await api.get('/api/info');
   // If the PC itself is browsing via a LAN name/IP, that address works for the tablet too.
   const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
-  const urls = (info.urls.length ? info.urls : local ? [] : [location.origin]).map(u => `${u}/tablet`);
+  const bases = info.urls.length ? info.urls : local ? [] : [location.origin];
+  const urls = bases.map(u => `${u}/tablet`);
   const box = modal.querySelector('.urls');
-  box.innerHTML = urls.map(u => `<div class="url"><img alt="QR code" src="/api/qr?text=${encodeURIComponent(u)}"><code>${esc(u)}</code></div>`).join('');
+  // first address only: one QR for the tablet, one for the phone
+  box.innerHTML = bases.slice(0, 1).flatMap(b => [['Tablet', `${b}/tablet`], ['Phone (camera)', `${b}/camera`]])
+    .map(([label, u]) => `<div class="url"><b>${label}</b><img alt="QR code" src="/api/qr?text=${encodeURIComponent(u)}"><code>${esc(u)}</code></div>`).join('');
   modal.querySelector('.docker').hidden = urls.length > 0;
   modal.querySelector('.install-url').textContent = urls.length ? urls[0].replace(/\/tablet$/, '/install') : '/install';
   modal.hidden = false;
@@ -493,6 +560,8 @@ function toastMsg(text) {
 $('#btn-new').onclick = () => newNote();
 $('#btn-folder').onclick = () => newFolder();
 $('#btn-draw').onclick = insertDrawing;
+$('#btn-photo').onclick = insertPhoto;
+$('#phone-chip').onclick = openConnect;
 $('#btn-math').onclick = () => { if (mode === 'read') setMode('edit'); editor.insertMath(true); };
 for (const [btn, kind] of [['#btn-bullets', 'bullet'], ['#btn-numbers', 'number']]) {
   $(btn).addEventListener('mousedown', e => e.preventDefault()); // keep the editor's selection
@@ -514,6 +583,7 @@ document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   if (mod && e.altKey && k === 'd') { e.preventDefault(); insertDrawing(); }
+  else if (mod && e.altKey && k === 'p') { e.preventDefault(); insertPhoto(); }
   else if (mod && !e.shiftKey && k === 'o') { e.preventDefault(); openSwitcher(); }
   else if (mod && !e.shiftKey && k === 'e') { e.preventDefault(); setMode(mode === 'read' ? 'edit' : 'read'); }
   else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); $('#search').focus(); $('#search').select(); }

@@ -6,7 +6,7 @@ import path from 'node:path';
 
 const watch = process.argv.includes('--watch');
 const options = {
-  entryPoints: { pc: 'web/pc/main.js', tablet: 'web/tablet/main.js' },
+  entryPoints: { pc: 'web/pc/main.js', tablet: 'web/tablet/main.js', camera: 'web/camera/main.js' },
   bundle: true,
   format: 'esm',
   splitting: true, // the math editor (MathLive) loads only when first used

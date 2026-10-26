@@ -14,6 +14,7 @@ import { tags as t } from '@lezer/highlight';
 import { createInkEmbed } from './inkEmbed.js';
 import { mathExtension, mathCompletion, insertMath } from './math.js';
 import { listExtension, toggleListRenumbered } from './lists.js';
+import { imageField } from './imageEmbed.js';
 
 export const EMBED_RE = /^!\[\[ink-([a-z0-9]+)\.svg\]\]\s*$/;
 export const embedLine = id => `![[ink-${id}.svg]]`;
@@ -87,7 +88,7 @@ const mdStyle = HighlightStyle.define([
 
 // --- public API -----------------------------------------------------------------
 
-export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
+export function createEditor(parent, { onChange, onOpenLink, getNoteNames, onImageFiles = () => {} }) {
   const linkCompletion = ctx => {
     const m = ctx.matchBefore(/\[\[[^\]\n]*$/);
     if (!m) return null;
@@ -121,6 +122,7 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     EditorView.lineWrapping,
     placeholder('Start typing…'),
     inkField,
+    imageField,
     wikilinks,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, indentWithTab]),
     EditorView.domEventHandlers({
@@ -130,6 +132,23 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
         if (!link || e.button !== 0 || e.altKey || e.shiftKey) return false;
         e.preventDefault();
         onOpenLink(link.dataset.link, { newTab: e.ctrlKey || e.metaKey });
+        return true;
+      },
+      // Paste or drop image files straight into the note.
+      paste(e) {
+        const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+        if (!files.length) return false;
+        e.preventDefault();
+        onImageFiles(files);
+        return true;
+      },
+      drop(e, view) {
+        const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
+        if (!files.length) return false;
+        e.preventDefault();
+        const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+        if (pos != null) view.dispatch({ selection: { anchor: pos } });
+        onImageFiles(files);
         return true;
       },
     }),
@@ -154,19 +173,32 @@ export function createEditor(parent, { onChange, onOpenLink, getNoteNames }) {
     },
     // Insert a drawing embed on its own line at the cursor.
     insertDrawing(id) {
+      this.insertLine(embedLine(id));
+    },
+    // Insert a line of its own (embed) after the cursor's line, or in place of an empty line.
+    insertLine(content) {
       const { state } = view;
-      const pos = state.selection.main.head;
-      const line = state.doc.lineAt(pos);
-      const before = line.text.trim() ? '\n' : '';
-      const insertAt = line.text.trim() ? line.to : line.from;
-      const after = '\n';
-      const text = `${before}${embedLine(id)}${after}`;
-      view.dispatch({
-        changes: { from: insertAt, to: line.text.trim() ? line.to : line.to, insert: text },
-        selection: { anchor: insertAt + text.length },
-        scrollIntoView: true,
-      });
+      const line = state.doc.lineAt(state.selection.main.head);
+      const filled = !!line.text.trim();
+      const last = line.number === state.doc.lines;
+      // goes below a line with text, or replaces an empty line; a line break after it only if none follows
+      const text = `${filled ? '\n' : ''}${content}${last ? '\n' : ''}`;
+      const from = filled ? line.to : line.from;
+      view.dispatch({ changes: { from, to: line.to, insert: text }, selection: { anchor: from + text.length + (last ? 0 : 1) }, scrollIntoView: true });
       view.focus();
+    },
+    // Remove the line that is exactly `content` (e.g. a cancelled picture placeholder).
+    removeLine(content) {
+      const doc = view.state.doc;
+      for (let i = 1; i <= doc.lines; i++) {
+        const line = doc.line(i);
+        if (line.text.trim() !== content) continue;
+        const from = i === doc.lines && i > 1 ? line.from - 1 : line.from;
+        const to = i < doc.lines ? line.to + 1 : line.to;
+        view.dispatch({ changes: { from, to } });
+        return true;
+      }
+      return false;
     },
   };
 }

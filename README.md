@@ -55,6 +55,7 @@ npm start
 | Search | `Ctrl+Shift+F` |
 | New note | `Alt+N` |
 | Follow a link | click a `[[link]]` (Ctrl+click: new tab) |
+| Picture from phone | **Picture** button or `Ctrl+Alt+P`: the phone (`/camera`) asks you to take or choose a photo, which appears in the note. You can also paste or drop images. Stored in `Attachments/` as `![[photo-….jpg]]` |
 | Lists | toolbar buttons, `Ctrl+Shift+8` (bullets) / `Ctrl+Shift+7` (numbers), or just type `- ` / `1. `. Enter continues, Enter on an empty item ends the list, Tab / Shift+Tab nest (numbers renumber) |
 | Math | `Ctrl+M` (inline) / `Ctrl+Shift+M` or **Math** button (block) opens a Desmos-style math box: `^` exponent, `/` fraction, `sqrt`, `pi`, `theta`, `<=` … convert as you type. Enter/Tab/Esc finishes. Click an equation to edit it, Alt+click for raw LaTeX. Stored as LaTeX (`$…$`, `$$…$$`), so Obsidian renders it too |
 

@@ -19,6 +19,7 @@ const PUBLIC = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT) || 4777;
 const VAULT = path.resolve(process.env.VAULT_DIR || path.join(ROOT, 'vault'));
 const INK_DIR = 'Drawings';
+const ATTACH_DIR = 'Attachments'; // photos from the phone, pasted images
 const TRASH_DIR = '.trash';
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // optional, e.g. https://inkvault.example.ts.net
 // Second port speaking https with a self-made certificate (see server/tls.js). 0 disables it.
@@ -62,7 +63,7 @@ async function tree(dir = VAULT) {
     if (e.name.startsWith('.')) continue;
     const abs = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (dir === VAULT && e.name === INK_DIR) continue;
+      if (dir === VAULT && (e.name === INK_DIR || e.name === ATTACH_DIR)) continue;
       out.push({ type: 'folder', name: e.name, path: rel(abs), children: await tree(abs) });
     } else if (e.name.toLowerCase().endsWith('.md')) {
       out.push({ type: 'file', name: e.name.slice(0, -3), path: rel(abs) });
@@ -174,7 +175,7 @@ const MIME = {
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png',
   '.svg': 'image/svg+xml', '.map': 'application/json', '.ico': 'image/x-icon',
 };
-const PAGES = { '/': 'index.html', '/pc': 'pc.html', '/tablet': 'tablet.html', '/install': 'install.html' };
+const PAGES = { '/': 'index.html', '/pc': 'pc.html', '/tablet': 'tablet.html', '/camera': 'camera.html', '/install': 'install.html' };
 
 function send(res, status, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
@@ -182,7 +183,7 @@ function send(res, status, body, type = 'application/json') {
   res.end(data);
 }
 
-async function readBody(req, limit = 20 * 1024 * 1024) {
+async function readBuffer(req, limit = 20 * 1024 * 1024) {
   const chunks = [];
   let size = 0;
   for await (const c of req) {
@@ -190,7 +191,30 @@ async function readBody(req, limit = 20 * 1024 * 1024) {
     if (size > limit) throw new HttpError(413, 'too large');
     chunks.push(c);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
+}
+const readBody = async (req, limit) => (await readBuffer(req, limit)).toString('utf8');
+
+// ---------------------------------------------------------------------------
+// Images: stored in Attachments/, embedded as ![[name.jpg]] (Obsidian style),
+// so they're found by file name anywhere in the vault.
+// ---------------------------------------------------------------------------
+
+const IMAGE_RE = /^[\w.-]{1,120}\.(jpe?g|png|gif|webp)$/i;
+const IMAGE_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+
+async function findFile(name, dir = VAULT) {
+  const direct = path.join(VAULT, ATTACH_DIR, name);
+  if (dir === VAULT && (await exists(direct))) return direct;
+  for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (e.name.startsWith('.')) continue;
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const hit = await findFile(name, abs);
+      if (hit) return hit;
+    } else if (e.name === name) return abs;
+  }
+  return null;
 }
 const readJSON = async req => {
   try { return JSON.parse(await readBody(req)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, 'bad json'); }
@@ -293,6 +317,14 @@ const routes = {
     }
     return results;
   },
+  'PUT /api/attachment': async (req, url) => {
+    const name = url.searchParams.get('name') || '';
+    if (!IMAGE_RE.test(name)) throw new HttpError(400, 'images must be .jpg, .png, .gif or .webp');
+    const data = await readBuffer(req, 40 * 1024 * 1024);
+    if (!data.length) throw new HttpError(400, 'empty file');
+    await writeAtomic(path.join(VAULT, ATTACH_DIR, name), data);
+    return { name };
+  },
   'POST /api/drawing': async () => {
     const d = newDrawing();
     drawings.set(d.id, Promise.resolve(d));
@@ -315,6 +347,13 @@ async function handle(req, res) {
       return send(res, 200, out);
     }
     let m;
+    if (req.method === 'GET' && (m = /^\/api\/file\/([^/]+)$/.exec(url.pathname))) {
+      const name = decodeURIComponent(m[1]);
+      const abs = IMAGE_RE.test(name) && (await findFile(name));
+      if (!abs) return send(res, 404, { error: 'not found' });
+      res.writeHead(200, { 'Content-Type': IMAGE_MIME[name.split('.').pop().toLowerCase()], 'Cache-Control': 'no-cache' });
+      return fss.createReadStream(abs).pipe(res);
+    }
     if (req.method === 'GET' && (m = /^\/api\/drawing\/([a-z0-9]+)$/.exec(url.pathname))) {
       const d = await getDrawing(m[1]);
       return d ? send(res, 200, d) : send(res, 404, { error: 'not found' });
@@ -351,6 +390,7 @@ for (const srv of [server, secureServer].filter(Boolean)) {
   });
 }
 let active = null; // { id, note } — the drawing currently open on the tablet
+const photoRequests = new Map(); // reqId -> { reqId, note } — pictures the PC is waiting for
 
 function broadcastAll(msg, except = null, role = null) {
   const s = JSON.stringify(msg);
@@ -360,12 +400,13 @@ function broadcastAll(msg, except = null, role = null) {
 }
 
 function broadcastState() {
-  let tablets = 0, pcs = 0;
+  let tablets = 0, pcs = 0, cameras = 0;
   for (const c of wss.clients) {
     if (c.role === 'tablet') tablets++;
     else if (c.role === 'pc') pcs++;
+    else if (c.role === 'camera') cameras++;
   }
-  broadcastAll({ type: 'state', active, tablets, pcs });
+  broadcastAll({ type: 'state', active, tablets, pcs, cameras });
 }
 
 async function openOnTablets(target = null) {
@@ -400,11 +441,27 @@ async function onMessage(ws, raw) {
   try { msg = JSON.parse(raw); } catch { return; }
   switch (msg.type) {
     case 'hello': {
-      ws.role = ['pc', 'tablet'].includes(msg.role) ? msg.role : 'viewer';
+      ws.role = ['pc', 'tablet', 'camera'].includes(msg.role) ? msg.role : 'viewer';
       // changes made while the client was offline
       for (const p of Array.isArray(msg.pending) ? msg.pending.slice(0, 500) : []) await applyClientChange(ws, p.id, p.change);
       broadcastState();
       if (ws.role === 'tablet') await openOnTablets(ws);
+      if (ws.role === 'camera') for (const r of photoRequests.values()) ws.send(JSON.stringify({ type: 'photo-request', ...r }));
+      break;
+    }
+    // Picture from the phone: PC asks -> phones show "take / choose photo" ->
+    // a phone uploads it (PUT /api/attachment) and reports done -> PC shows it.
+    case 'photo-request': {
+      if (typeof msg.reqId !== 'string' || !/^[a-z0-9]{4,40}$/.test(msg.reqId)) return;
+      const r = { reqId: msg.reqId, note: typeof msg.note === 'string' ? msg.note.slice(0, 500) : '' };
+      photoRequests.set(r.reqId, r);
+      broadcastAll({ type: 'photo-request', ...r }, null, 'camera');
+      break;
+    }
+    case 'photo-done':
+    case 'photo-cancel': {
+      if (!photoRequests.delete(msg.reqId)) return;
+      broadcastAll({ type: msg.type, reqId: msg.reqId, name: IMAGE_RE.test(msg.name || '') ? msg.name : undefined });
       break;
     }
     case 'open': {

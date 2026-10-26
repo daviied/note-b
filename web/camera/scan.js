@@ -91,19 +91,37 @@ export function detectQuad(src) {
   }
   if (bestId < 0 || bestSize < n * 0.12 || bestSize > n * 0.97) return fallback();
 
-  // corners = extreme points of the region along the diagonals
-  const ext = [[Infinity], [-Infinity], [-Infinity], [Infinity]].map(v => ({ v: v[0], p: null }));
+  // Outline of the region -> convex hull -> the 4 hull points enclosing the most area.
+  // (Works for boards at any angle, unlike "furthest point along each diagonal".)
+  const edge = [];
   for (let i = 0; i < n; i++) {
     if (label[i] !== bestId) continue;
     const x = i % sw, y = (i / sw) | 0;
-    if (x + y < ext[0].v) ext[0] = { v: x + y, p: [x, y] }; // top-left
-    if (x - y > ext[1].v) ext[1] = { v: x - y, p: [x, y] }; // top-right
-    if (x + y > ext[2].v) ext[2] = { v: x + y, p: [x, y] }; // bottom-right
-    if (x - y < ext[3].v) ext[3] = { v: x - y, p: [x, y] }; // bottom-left
+    if (x === 0 || y === 0 || x === sw - 1 || y === sh - 1 || label[i - 1] !== bestId || label[i + 1] !== bestId || label[i - sw] !== bestId || label[i + sw] !== bestId) {
+      edge.push([x + 0.5, y + 0.5]);
+    }
   }
+  const hull = convexHull(edge);
+  if (hull.length < 4) return fallback();
+  let best4 = [0, 1, 2, 3].map(i => Math.floor((i * hull.length) / 4));
+  let bestArea = quadArea(best4.map(i => hull[i]));
+  for (let pass = 0; pass < 12; pass++) {
+    let improved = false;
+    for (let c = 0; c < 4; c++) {
+      for (let i = 0; i < hull.length; i++) {
+        if (best4.includes(i)) continue;
+        const trial = best4.slice();
+        trial[c] = i;
+        const a = quadArea(trial.map(j => hull[j]));
+        if (a > bestArea + 1e-6) { bestArea = a; best4 = trial; improved = true; }
+      }
+    }
+    if (!improved) break;
+  }
+  if (bestArea < n * 0.1) return fallback();
   // pull each corner slightly towards the middle, so no sliver of wall sneaks in at the edges
   const k = W / sw;
-  const pts = ext.map(e => [(e.p[0] + 0.5) * k, (e.p[1] + 0.5) * k]);
+  const pts = orderCorners(best4.map(i => hull[i])).map(([x, y]) => [x * k, y * k]);
   const cx = pts.reduce((s, p) => s + p[0], 0) / 4;
   const cy = pts.reduce((s, p) => s + p[1], 0) / 4;
   const inset = 2.5 * k; // ~2.5 pixels of the small analysis image
@@ -111,6 +129,42 @@ export function detectQuad(src) {
     const d = Math.hypot(cx - x, cy - y) || 1;
     return [clamp(x + ((cx - x) / d) * inset, 0, W), clamp(y + ((cy - y) / d) * inset, 0, H)];
   });
+}
+
+function convexHull(points) {
+  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [], upper = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+// Corners in order top-left, top-right, bottom-right, bottom-left (clockwise on screen).
+function orderCorners(pts) {
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  const sorted = pts.slice().sort((a, b) => Math.atan2(a[1] - cy, a[0] - cx) - Math.atan2(b[1] - cy, b[0] - cx));
+  let first = 0;
+  sorted.forEach((p, i) => { if (p[0] + p[1] < sorted[first][0] + sorted[first][1]) first = i; });
+  return sorted.slice(first).concat(sorted.slice(0, first));
+}
+
+function quadArea(pts) {
+  const q = orderCorners(pts);
+  let a = 0;
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % 4];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +205,44 @@ function homography(w, h, quad) {
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
-export function warp(src, quad, maxSide = 2400) {
-  // output size from the average lengths of opposite sides
-  let w = (dist(quad[0], quad[1]) + dist(quad[3], quad[2])) / 2;
-  let h = (dist(quad[0], quad[3]) + dist(quad[1], quad[2])) / 2;
+// True width/height of the photographed rectangle. Averaging opposite edges
+// badly squashes boards shot at a steep angle (the far edge looks short), so
+// instead recover the camera's focal length from the perspective and undo it
+// (Zhang & He, "Whiteboard scanning and image enhancement", 2007). Assumes the
+// photo is uncropped, so the lens centre is the image centre.
+export function boardAspect(quad, imgW, imgH) {
+  const cx = imgW / 2, cy = imgH / 2;
+  const [tl, tr, br, bl] = quad.map(([x, y]) => [x - cx, y - cy, 1]);
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  // Zhang's labelling: m1 = TL, m2 = TR, m3 = BL, m4 = BR
+  const m1 = tl, m2 = tr, m3 = bl, m4 = br;
+  const k2 = dot(cross(m1, m4), m3) / dot(cross(m2, m4), m3);
+  const k3 = dot(cross(m1, m4), m2) / dot(cross(m3, m4), m2);
+  const n2 = m2.map((v, i) => k2 * v - m1[i]);
+  const n3 = m3.map((v, i) => k3 * v - m1[i]);
+  // The focal length can only be solved when BOTH pairs of opposite edges converge.
+  // If either pair is (nearly) parallel - tilted in one direction only, or shot
+  // straight on - fall back to a typical phone main camera (~26 mm equivalent).
+  const diag = Math.hypot(imgW, imgH);
+  const typical = (0.6 * diag) ** 2;
+  const angle = (a, b, c, d) => {
+    const u = [b[0] - a[0], b[1] - a[1]], v = [d[0] - c[0], d[1] - c[1]];
+    return Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1]));
+  };
+  const parallel = angle(quad[0], quad[1], quad[3], quad[2]) < 0.035 || angle(quad[0], quad[3], quad[1], quad[2]) < 0.035; // ~2°
+  let f2 = -(n2[0] * n3[0] + n2[1] * n3[1]) / (n2[2] * n3[2]);
+  if (parallel || !Number.isFinite(f2) || f2 < (0.25 * diag) ** 2 || f2 > (4 * diag) ** 2) f2 = typical;
+  const aspect = Math.sqrt((n2[0] ** 2 + n2[1] ** 2 + f2 * n2[2] ** 2) / (n3[0] ** 2 + n3[1] ** 2 + f2 * n3[2] ** 2));
+  return Number.isFinite(aspect) && aspect > 0 ? clamp(aspect, 0.1, 10) : 1;
+}
+
+// `aspect` = width / height of the result (default: worked out from the perspective)
+export function warp(src, quad, maxSide = 2400, aspect = boardAspect(quad, src.width, src.height)) {
+  // keep about as many pixels as the longest edge had, in the true proportions
+  const base = Math.max(dist(quad[0], quad[1]), dist(quad[3], quad[2]), dist(quad[0], quad[3]), dist(quad[1], quad[2]));
+  let w = aspect >= 1 ? base : base * aspect;
+  let h = aspect >= 1 ? base / aspect : base;
   const k = Math.min(1, maxSide / Math.max(w, h));
   w = Math.max(1, Math.round(w * k));
   h = Math.max(1, Math.round(h * k));
@@ -248,6 +336,19 @@ export function enhance(src) {
     d[i + 2] = y + (b - y) * 1.35;
   }
   octx.putImageData(img, 0, 0);
+  return out;
+}
+
+// Manual stretch: factor > 1 makes it wider, < 1 taller. Keeps the long side's
+// resolution (shrinks the other side rather than blowing one up).
+export function stretch(src, factor) {
+  if (Math.abs(factor - 1) < 0.005) return src;
+  const w = factor >= 1 ? src.width : Math.round(src.width * factor);
+  const h = factor >= 1 ? Math.round(src.height / factor) : src.height;
+  const out = canvasOf(Math.max(1, w), Math.max(1, h));
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, out.width, out.height);
   return out;
 }
 

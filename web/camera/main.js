@@ -3,7 +3,7 @@
 // The photo then goes through a scan step: drag four corners onto the board,
 // see it straightened and cleaned up, and send it.
 import { connect } from '../common/socket.js';
-import { detectQuad, warp, enhance, rotate } from './scan.js';
+import { detectQuad, warp, enhance, rotate, stretch } from './scan.js';
 
 const MAX_SOURCE = 3200; // px; working size of the photo while editing
 const MAX_OUTPUT = 2400; // px; size of what's sent to the PC
@@ -195,8 +195,9 @@ $('#edit-next').onclick = async () => {
   btn.textContent = 'Straightening…';
   await new Promise(r => setTimeout(r, 30)); // let the label paint before the heavy work
   try {
-    job.warped = warp(job.src, job.quad, MAX_OUTPUT);
+    job.warped = warp(job.src, job.quad, MAX_OUTPUT); // true proportions worked out from the perspective
     job.cleaned = null;
+    setStretch(0);
     show('result');
   } finally {
     btn.disabled = false;
@@ -213,8 +214,21 @@ const resultCv = $('#result-canvas');
 function finalCanvas() {
   let c = job.warped;
   if ($('#res-enhance').checked) c = job.cleaned ||= enhance(job.warped);
-  return rotate(c, job.turns);
+  return rotate(stretch(c, 2 ** job.stretch), job.turns); // slider: -1..1 = half as wide .. twice as wide
 }
+
+function setStretch(v) {
+  job.stretch = v;
+  $('#res-stretch').value = v;
+  $('#res-shape-auto').disabled = v === 0;
+}
+let stretchFrame = 0;
+$('#res-stretch').addEventListener('input', e => {
+  setStretch(Math.abs(e.target.value) < 0.04 ? 0 : Number(e.target.value)); // snaps back to the automatic shape
+  cancelAnimationFrame(stretchFrame);
+  stretchFrame = requestAnimationFrame(drawResult);
+});
+$('#res-shape-auto').onclick = () => { setStretch(0); drawResult(); };
 
 function drawResult() {
   if (!job || screens.result.hidden) return;

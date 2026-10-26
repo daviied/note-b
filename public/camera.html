@@ -52,6 +52,12 @@
 <!-- Step 2: straightened result -->
 <section id="result" class="full" hidden>
   <div class="stage"><canvas id="result-canvas"></canvas></div>
+  <div class="shape">
+    <span>Taller</span>
+    <input type="range" id="res-stretch" min="-1" max="1" step="0.01" value="0" aria-label="Shape: taller or wider">
+    <span>Wider</span>
+    <button id="res-shape-auto" class="chip-btn">Auto</button>
+  </div>
   <div class="row">
     <button id="res-back" class="btn">Adjust corners</button>
     <button id="res-rotate" class="btn">Rotate</button>
